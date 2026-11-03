@@ -18,3 +18,8 @@ __pycache__/
 .env.*
 !.env.example
 !.env.sample
+cpp/.vs/
+cpp/build/
+cpp/out/
+cpp/vcpkg_installed/
+cpp/build_errors.txt
