@@ -22,6 +22,8 @@ cmake --build build/db --config Debug
 ctest --test-dir build/db -C Debug --output-on-failure
 ```
 
+Windows에서 PostgreSQL 설치 폴더의 `bin/libpq.dll`을 찾으면 CTest에 필요한 경로를 자동으로 설정한다. 자동으로 찾지 못하면 PostgreSQL `bin` 폴더를 PATH에 추가하고 시험한다. CMake 빌드 성공과 시험 프로그램 실행 성공은 별도로 확인한다.
+
 실제 DB 시험은 별도 표시한 테스트 프로젝트에서만 실행한다. `GOMMANNA_TEST_DATABASE_URL`, `GOMMANNA_RUN_DB_INTEGRATION=1`과 올바른 PostgreSQL CA 인증서(`PGSSLROOTCERT`)가 없으면 시험을 건너뛴다. 어댑터는 연결 시 `sslmode=verify-full`을 강제한다. 시험에는 가상 위치와 이름만 사용한다. 사용자·종료된 방 등 테스트 레코드가 DB에 남을 수 있다.
 
 실제 DB 연결 정보는 비밀번호다. Git, 앱 코드, 스크린샷, PR, 채팅에 넣지 않는다. URL의 호스트·포트는 Supabase Connect의 **Session pooler** 값을 사용한다. macOS나 다른 개발자의 컴퓨터에서는 각자 설치한 libpq와 환경 변수로 빌드해야 하며, Windows에서 빌드한 실행 파일을 그대로 공유하지 않는다.
@@ -50,4 +52,4 @@ ctest --test-dir build/db -C Debug --output-on-failure
 4. 여러 조건 확인과 저장을 하나의 트랜잭션으로 묶고, 방·참가자 행을 잠가 공유 중지와 저장이 엇갈리지 않게 한다.
 5. 공유 OFF 또는 이전 세션의 위치·메모는 조회 결과에서 제외한다. 메모를 쓸 당시의 위치는 현재 위치와 따로 저장한다.
 
-테스트에서 사용한 관리자 DB 비밀번호는 권한이 넓다. 팀원과 앱을 연동할 때는 필요한 권한만 가진 별도의 서버 접속 계정을 준비하고, 그 정보를 안전한 경로로 전달한다. 현재 테스트 DB를 운영 서비스처럼 사용하지 않는다.
+테스트에서 사용한 관리자 DB 비밀번호는 권한이 넓다. 서버 연동에는 별도의 `gommanna_login` 계정을 사용한다. 이 계정은 서버 전용 `gommanna_server` 역할로 전환해 필요한 테이블에 접근한다. 비밀번호는 migration이나 Git에 기록하지 않고 별도로 설정하며, 접속 정보는 안전한 경로로 전달한다. 현재 테스트 DB를 운영 서비스처럼 사용하지 않는다.

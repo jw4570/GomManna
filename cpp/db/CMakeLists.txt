@@ -34,4 +34,19 @@ if(BUILD_TESTING AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   endif()
   add_test(NAME gm_db_integration COMMAND gm_db_integration_test)
   set_tests_properties(gm_db_integration PROPERTIES SKIP_RETURN_CODE 77)
+
+  # On Windows, CTest also needs libpq.dll and its dependencies at runtime.
+  # Find them alongside the installation used for the import library.
+  if(WIN32)
+    find_file(GOMMANNA_LIBPQ_DLL NAMES libpq.dll
+      HINTS "${PostgreSQL_ROOT}/bin" "$ENV{PostgreSQL_ROOT}/bin"
+            "${PostgreSQL_LIBRARY_DIRS}/../bin" "${PostgreSQL_LIBRARY_DIRS}")
+    if(GOMMANNA_LIBPQ_DLL)
+      get_filename_component(GOMMANNA_LIBPQ_BIN "${GOMMANNA_LIBPQ_DLL}" DIRECTORY)
+      set_tests_properties(gm_db_config gm_db_integration PROPERTIES
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${GOMMANNA_LIBPQ_BIN}")
+    else()
+      message(WARNING "libpq.dll was not found. Add the PostgreSQL bin directory to PATH before running the tests.")
+    endif()
+  endif()
 endif()
