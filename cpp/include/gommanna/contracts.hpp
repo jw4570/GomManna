@@ -1,0 +1,145 @@
+#pragma once
+// GomManna shared contract v1.1 - declarations only.
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <string>
+#include <variant>
+#include <vector>
+
+namespace gommanna {
+using Id = std::string;                 // UUID string
+using TimeMs = std::int64_t;            // UTC Unix milliseconds
+using Epoch = std::int64_t;
+using Unit = std::monostate;
+inline constexpr int kContractVersion = 1;
+inline constexpr double kWalkingSpeedMPerMin = 80.0;
+inline constexpr double kEarthRadiusM = 6371000.0;
+inline constexpr TimeMs kDelayedAfterMs = 30000;
+inline constexpr TimeMs kStaleAfterMs = 120000;
+inline constexpr TimeMs kFutureToleranceMs = 5000;
+inline constexpr TimeMs kGuestSessionTtlMs = 30LL * 24 * 60 * 60 * 1000;
+inline constexpr int kMaxRoomMembers = 8;
+
+enum class ErrorCode {
+    invalid_argument, unauthenticated, forbidden, not_found, conflict,
+    invite_code_conflict,
+    room_closed, sharing_off, stale_update, db_unavailable,
+    internal, not_implemented
+};
+struct Error { ErrorCode code; std::string message; };
+template<class T> using Result = std::variant<T, Error>;
+enum class Freshness { off, no_data, fresh, delayed, stale };
+
+struct Coordinate { double latitude{}; double longitude{}; };
+struct User { Id id; TimeMs created_at_ms{}; };
+struct Room {
+    Id id; std::string title; Id host_id; std::string invite_code;
+    bool active{true}; TimeMs created_at_ms{};
+    std::optional<TimeMs> ended_at_ms;
+};
+struct Member {
+    Id id; Id room_id; Id user_id; std::string nickname;
+    bool is_sharing{false}; Epoch sharing_epoch{}; TimeMs joined_at_ms{};
+};
+struct Location {
+    Coordinate coordinate;
+    std::optional<double> accuracy_m;
+    TimeMs captured_at_ms{}; TimeMs received_at_ms{};
+    Epoch sharing_epoch{}; std::int64_t sequence{};
+};
+struct LocationUpdate {
+    Coordinate coordinate;
+    std::optional<double> accuracy_m;
+    TimeMs captured_at_ms{}; Epoch sharing_epoch{};
+    std::int64_t sequence{};
+};
+struct PhotoRef { std::string key; TimeMs uploaded_at_ms{}; };
+struct Note {
+    Id id; std::string text; TimeMs written_at_ms{};
+    std::optional<Coordinate> origin;
+    std::optional<TimeMs> origin_captured_at_ms;
+    Epoch sharing_epoch{}; std::optional<PhotoRef> photo;
+};
+struct NoteDraft { std::string text; Epoch sharing_epoch{}; };
+struct MemberView {
+    Member member;
+    Freshness location_status{Freshness::no_data};
+    std::optional<Location> location;
+    std::optional<Note> note;
+};
+struct RoomMembership { Room room; Member member; };
+struct Invite { std::string invite_code; std::string qr_payload; std::string qr_svg; };
+struct TravelEstimate {
+    double distance_m{}; std::int64_t walk_minutes{};
+    double walking_speed_m_per_min{kWalkingSpeedMPerMin};
+};
+
+// Ian: database adapter; no HTTP, JSON, PGconn or PGresult in this interface.
+// actor_id is resolved from a verified guest token, not trusted request JSON.
+// All data-changing methods must enforce access/state atomically in the DB.
+class IRepository {
+public:
+    virtual ~IRepository() = default;
+    virtual Result<User> create_guest(const std::string& token_sha256,
+        TimeMs now_ms, TimeMs expires_at_ms) = 0;
+    virtual Result<User> authenticate_guest(const std::string& token_sha256,
+        TimeMs now_ms) = 0;
+    virtual Result<Room> get_room(const Id& actor_id, const Id& room_id) = 0;
+    virtual Result<Room> find_room_by_code(const std::string& invite_code) = 0;
+    virtual Result<RoomMembership> create_room(const Id& actor_id,
+        const std::string& title, const std::string& nickname,
+        const std::string& invite_code, TimeMs now_ms) = 0;
+    virtual Result<Member> join_room(const Id& actor_id, const Id& room_id,
+        const std::string& nickname, TimeMs now_ms) = 0;
+    virtual Result<Unit> leave_room(const Id& actor_id, const Id& room_id,
+        TimeMs now_ms) = 0;
+    virtual Result<Unit> end_room(const Id& actor_id, const Id& room_id,
+        TimeMs now_ms) = 0;
+    virtual Result<std::vector<MemberView>> list_visible_members(
+        const Id& actor_id, const Id& room_id, TimeMs now_ms) = 0;
+    virtual Result<Member> set_sharing(const Id& actor_id, const Id& room_id,
+        bool enabled, TimeMs now_ms) = 0;
+    virtual Result<Location> update_location(const Id& actor_id,
+        const Id& room_id, const LocationUpdate& update, TimeMs now_ms) = 0;
+    virtual Result<Note> save_note(const Id& actor_id, const Id& room_id,
+        const NoteDraft& draft, TimeMs now_ms) = 0;
+    virtual Result<Unit> delete_note(const Id& actor_id, const Id& room_id,
+        TimeMs now_ms) = 0;
+    // Optional photo integration; return not_implemented until available.
+    virtual Result<Note> attach_photo(const Id& actor_id, const Id& room_id,
+        const Id& note_id, TimeMs expected_written_at_ms,
+        const PhotoRef& photo, Epoch sharing_epoch, TimeMs now_ms) = 0;
+};
+
+// Seoyeong: room rules + invite/QR; uses IRepository, never writes SQL here.
+class IRoomService {
+public:
+    virtual ~IRoomService() = default;
+    virtual Result<RoomMembership> create_room(const Id& actor_id,
+        const std::string& title, const std::string& nickname,
+        TimeMs now_ms) = 0;
+    virtual Result<RoomMembership> join_room(const Id& actor_id,
+        const std::string& invite_code, const std::string& nickname,
+        TimeMs now_ms) = 0;
+    virtual Result<Unit> leave_room(const Id& actor_id, const Id& room_id,
+        TimeMs now_ms) = 0;
+    virtual Result<Unit> end_room(const Id& actor_id, const Id& room_id,
+        TimeMs now_ms) = 0;
+    virtual Result<Invite> get_invite(const Id& actor_id, const Id& room_id) = 0;
+};
+
+// Composition entry points. Own repository before creating room service.
+struct RepositoryConfig { std::string connection_string; };
+Result<std::unique_ptr<IRepository>> make_postgres_repository(
+    const RepositoryConfig& config);                       // Ian
+std::unique_ptr<IRepository> make_fake_repository();       // Wongyu
+std::unique_ptr<IRoomService> make_room_service(
+    IRepository& repository);                            // Seoyeong
+
+// Juwon: pure calculations; no DB, HTTP, Swift or external library required.
+Result<TravelEstimate> estimate_walk(Coordinate from, Coordinate to,
+    double walking_speed_m_per_min = kWalkingSpeedMPerMin);
+Freshness classify_location(const std::optional<Location>& location,
+    bool is_sharing, Epoch current_epoch, TimeMs now_ms);
+} // namespace gommanna
