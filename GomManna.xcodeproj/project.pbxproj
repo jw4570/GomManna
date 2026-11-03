@@ -14,7 +14,6 @@
 		04FC15323098CB68009ED49B /* Exceptions for "GomManna" folder in "GomManna" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				Services/CRules/Sources/meeting_point.c,
 			);
 			target = 048110DC30772399005B9B45 /* GomManna */;
 		};
