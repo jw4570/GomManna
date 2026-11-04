@@ -1,4 +1,5 @@
 #include "gommanna/contracts.hpp"
+#include "environment.hpp"
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 #include <openssl/rand.h>
@@ -18,7 +19,8 @@ TimeMs now_ms() { return std::chrono::duration_cast<std::chrono::milliseconds>(s
 std::string hex(const unsigned char* bytes, size_t n) { static constexpr char chars[]="0123456789abcdef"; std::string s; s.reserve(n*2); for(size_t i=0;i<n;++i){s+=chars[bytes[i]>>4];s+=chars[bytes[i]&15];} return s; }
 std::string sha256(std::string_view token) { unsigned char out[SHA256_DIGEST_LENGTH]; SHA256(reinterpret_cast<const unsigned char*>(token.data()), token.size(), out); return hex(out,sizeof out); }
 std::string token() { unsigned char b[32]; if(RAND_bytes(b,sizeof b)!=1) throw std::runtime_error("secure random generation failed"); return hex(b,sizeof b); }
-std::string env(const char* name, const char* fallback="") { const char* v=std::getenv(name); return v? v:fallback; }
+http_config::Values file_environment;
+std::string env(const char* name, const char* fallback="") { return http_config::get(file_environment,name,fallback); }
 std::string code(ErrorCode c) { switch(c) {
 case ErrorCode::invalid_argument:return "INVALID_ARGUMENT"; case ErrorCode::unauthenticated:return "UNAUTHENTICATED";case ErrorCode::forbidden:return "FORBIDDEN";case ErrorCode::not_found:return "NOT_FOUND";case ErrorCode::conflict:return "CONFLICT";case ErrorCode::invite_code_conflict:return "INVITE_CODE_CONFLICT";case ErrorCode::room_closed:return "ROOM_CLOSED";case ErrorCode::sharing_off:return "SHARING_OFF";case ErrorCode::stale_update:return "STALE_UPDATE";case ErrorCode::db_unavailable:return "DB_UNAVAILABLE";case ErrorCode::not_implemented:return "NOT_IMPLEMENTED";default:return "INTERNAL";}}
 int status(ErrorCode c) {switch(c){case ErrorCode::invalid_argument:return 400;case ErrorCode::unauthenticated:return 401;case ErrorCode::forbidden:return 403;case ErrorCode::not_found:return 404;case ErrorCode::conflict:case ErrorCode::invite_code_conflict:case ErrorCode::sharing_off:case ErrorCode::stale_update:return 409;case ErrorCode::room_closed:return 410;case ErrorCode::not_implemented:return 501;case ErrorCode::db_unavailable:return 503;default:return 500;}}
@@ -51,6 +53,10 @@ if(method=="GET")server.Get(path,wrapped);else if(method=="POST")server.Post(pat
 }
 namespace gommanna { std::unique_ptr<IRoomService> make_fake_room_service(IRepository&); }
 int main(){try{
+file_environment=http_config::load_file();
+#ifdef GOMMANNA_TEST_WITHOUT_ROOM_SERVICE
+std::cerr<<"WARNING: test-only build; room management endpoints return 501.\n";
+#endif
 #ifdef GOMMANNA_USE_FAKE_REPOSITORY
 std::cerr<<"WARNING: FAKE DATA mode. NOT a Supabase integration test.\n";
 auto repo=make_fake_repository();
