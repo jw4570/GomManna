@@ -2,9 +2,8 @@
 #include <cassert>
 #include <iostream>
 using namespace gommanna;
-namespace gommanna {std::unique_ptr<IRoomService> make_fake_room_service(IRepository&);}
 int main(){
- auto db=make_fake_repository();auto service=make_fake_room_service(*db);
+ auto db=make_fake_repository();auto service=make_room_service(*db);
  auto a=std::get<User>(db->create_guest("hash1",1000,999999));
  auto b=std::get<User>(db->create_guest("hash2",1000,999999));
  auto r=std::get<RoomMembership>(service->create_room(a.id,"Travel","A",1000));

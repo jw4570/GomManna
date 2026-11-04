@@ -38,7 +38,7 @@ def verify(executable, code=None):
 
 if __name__ == "__main__":
     executable = sys.argv[1]
-    for code in ["ABCD2345", "AAAAAAAA", "99999999", "HJKLMNPQ", "ZZZZZZZZ", "UGZKJA4H"]:
+    for code in ["ABCD23", "AAAAAA", "999999", "HJKLMN", "ZZZZZZ", "UGZKJA"]:
         verify(executable, code)
     for _ in range(14):
         verify(executable)

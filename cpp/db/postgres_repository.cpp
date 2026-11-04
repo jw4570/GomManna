@@ -161,19 +161,6 @@ Note note_at(PGresult* r, int row) {
     return x;
 }
 
-Freshness freshness(const std::optional<Location>& loc, bool sharing, Epoch epoch, TimeMs now_ms) {
-    if (!sharing) return Freshness::off;
-    if (!loc || loc->sharing_epoch != epoch || loc->captured_at_ms < 0 ||
-        static_cast<long double>(loc->captured_at_ms) > static_cast<long double>(now_ms) + kFutureToleranceMs ||
-        !std::isfinite(loc->coordinate.latitude) || !std::isfinite(loc->coordinate.longitude) ||
-        std::abs(loc->coordinate.latitude) > 90.0 || std::abs(loc->coordinate.longitude) > 180.0)
-        return Freshness::no_data;
-    const auto age = std::max<TimeMs>(0, now_ms - loc->captured_at_ms);
-    if (age < kDelayedAfterMs) return Freshness::fresh;
-    if (age < kStaleAfterMs) return Freshness::delayed;
-    return Freshness::stale;
-}
-
 class PostgresRepository final : public IRepository {
 public:
     explicit PostgresRepository(PgConnection conn) : conn_(std::move(conn)) {}
@@ -190,9 +177,10 @@ public:
     Result<Location> update_location(const Id&, const Id&, const LocationUpdate&, TimeMs) override;
     Result<Note> save_note(const Id&, const Id&, const NoteDraft&, TimeMs) override;
     Result<Unit> delete_note(const Id&, const Id&, TimeMs) override;
-    Result<Note> attach_photo(const Id&, const Id&, const Id&, TimeMs, const PhotoRef&, Epoch, TimeMs) override {
-        return Error{ErrorCode::not_implemented,"photo attachment is not implemented"};
-    }
+    Result<Note> attach_photo(const Id&, const Id&, const Id&, TimeMs, const PhotoRef&, Epoch, TimeMs) override;
+    Result<Unit> reserve_photo_cleanup(const std::string&, TimeMs) override;
+    Result<std::vector<std::string>> due_photo_cleanup(TimeMs) override;
+    Result<Unit> finish_photo_cleanup(const std::string&) override;
 private:
     template<class T, class F> Result<T> guarded(F&& function) {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -391,7 +379,7 @@ Result<std::vector<MemberView>> PostgresRepository::list_visible_members(const I
             view.member=member_at(r.get(),i);
             if(!is_null(r.get(),i,"l_lat")) view.location=location_at(r.get(),i);
             if(!is_null(r.get(),i,"n_id")) view.note=note_at(r.get(),i);
-            view.location_status=freshness(view.location,view.member.is_sharing,view.member.sharing_epoch,now);
+            view.location_status=classify_location(view.location,view.member.is_sharing,view.member.sharing_epoch,now);
             if(view.location_status==Freshness::off || view.location_status==Freshness::no_data)
                 view.location.reset();
             // SQL filters notes/photos before they leave the database.
@@ -473,7 +461,7 @@ Result<Note> PostgresRepository::save_note(const Id& actor, const Id& room_id, c
         Param latitude,longitude,captured;
         if(PQntuples(previous.get())>0) {
             Location loc=location_at(previous.get(),0);
-            if(freshness(loc,true,member.sharing_epoch,now)==Freshness::fresh) {
+            if(classify_location(loc,true,member.sharing_epoch,now)==Freshness::fresh) {
                 latitude=number(loc.coordinate.latitude); longitude=number(loc.coordinate.longitude);
                 captured=std::to_string(loc.captured_at_ms);
             }
@@ -502,6 +490,66 @@ Result<Unit> PostgresRepository::delete_note(const Id& actor, const Id& room_id,
         if(!member.is_sharing) reject(ErrorCode::sharing_off,"sharing is off");
         exec(conn_.get(),"delete from gommanna.member_notes where member_id=$1::uuid",{member.id});
         tx.commit();
+        return Unit{};
+    });
+}
+
+Result<Note> PostgresRepository::attach_photo(const Id& actor, const Id& room_id,
+    const Id& note_id, TimeMs expected_written, const PhotoRef& photo, Epoch epoch, TimeMs now) {
+    return guarded<Note>([&] {
+        require_now(now); require_now(expected_written); require_now(photo.uploaded_at_ms);
+        require_text(note_id); require_text(photo.key);
+        if(epoch < 1) reject(ErrorCode::invalid_argument,"invalid sharing session");
+        Transaction tx(conn_.get());
+        locked_room(room_id);
+        Member member = locked_member(actor,room_id);
+        if(!member.is_sharing) reject(ErrorCode::sharing_off,"sharing is off");
+        if(member.sharing_epoch!=epoch) reject(ErrorCode::stale_update,"outdated sharing session");
+        auto previous=exec(conn_.get(),"select "+kNoteColumns+
+            "from gommanna.member_notes n where n.member_id=$1::uuid for update",{member.id});
+        if(PQntuples(previous.get())==0) reject(ErrorCode::not_found,"note not found");
+        const Note old = note_at(previous.get(),0);
+        if(old.id!=note_id || old.written_at_ms!=expected_written || old.sharing_epoch!=epoch)
+            reject(ErrorCode::stale_update,"note changed during photo upload");
+        auto stored=exec(conn_.get(),"with updated as (update gommanna.member_notes set "
+            "photo_key=$2,photo_uploaded_at=to_timestamp($3::double precision/1000) "
+            "where member_id=$1::uuid returning *) select "+kNoteColumns+"from updated n",
+            {member.id,photo.key,std::to_string(photo.uploaded_at_ms)});
+        Note result=note_at(stored.get(),0);
+        exec(conn_.get(),"delete from gommanna.photo_cleanup where storage_key=$1",{photo.key});
+        tx.commit();
+        return result;
+    });
+}
+
+Result<Unit> PostgresRepository::reserve_photo_cleanup(const std::string& key, TimeMs not_before) {
+    return guarded<Unit>([&] {
+        require_text(key); require_now(not_before);
+        exec(conn_.get(),"insert into gommanna.photo_cleanup(storage_key,not_before) "
+            "values($1,to_timestamp($2::double precision/1000)) on conflict(storage_key) do nothing",
+            {key,std::to_string(not_before)});
+        return Unit{};
+    });
+}
+
+Result<std::vector<std::string>> PostgresRepository::due_photo_cleanup(TimeMs now) {
+    return guarded<std::vector<std::string>>([&] {
+        require_now(now);
+        auto rows=exec(conn_.get(),"select q.storage_key from gommanna.photo_cleanup q "
+            "where q.not_before<=to_timestamp($1::double precision/1000) "
+            "and not exists(select 1 from gommanna.member_notes n where n.photo_key=q.storage_key) "
+            "order by q.created_at limit 20",{std::to_string(now)});
+        std::vector<std::string> result;
+        for(int i=0;i<PQntuples(rows.get());++i) result.push_back(string_at(rows.get(),i,"storage_key"));
+        return result;
+    });
+}
+
+Result<Unit> PostgresRepository::finish_photo_cleanup(const std::string& key) {
+    return guarded<Unit>([&] {
+        require_text(key);
+        exec(conn_.get(),"delete from gommanna.photo_cleanup q where q.storage_key=$1 "
+            "and not exists(select 1 from gommanna.member_notes n where n.photo_key=q.storage_key)",{key});
         return Unit{};
     });
 }

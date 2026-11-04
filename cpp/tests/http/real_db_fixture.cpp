@@ -19,7 +19,7 @@ std::string test_invite() {
     constexpr char alphabet[] = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     std::random_device random;
     std::string result;
-    for (int i = 0; i < 8; ++i) result += alphabet[random() % 32];
+    for (int i = 0; i < 6; ++i) result += alphabet[random() % 32];
     return result;
 }
 } // namespace

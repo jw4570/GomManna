@@ -15,9 +15,9 @@ int main(void) {
     size_t required = 0, actual = 0;
     char *exact;
     int i;
-    const char *bad[] = {NULL, "", "ABC", "ABCDEFGHJ", "abcd2345",
-                         "ABCD0123", "ABCDI234", "ABCDO234", "ABC 2345",
-                         "ABCD234\n", "ABCD234\xFF", "<script>"};
+    const char *bad[] = {NULL, "", "ABC", "ABCDEFG", "ABCD2345", "abcd23",
+                         "ABCD01", "ABCDI2", "ABCDO2", "ABC 23",
+                         "ABCD2\n", "ABCD2\xFF", "<script>"};
     CHECK(strlen(GM_ROOM_CODE_ALPHABET) == 32);
     for (i = 0; i < 1000; ++i) {
         memset(code, 'Z', sizeof(code));
@@ -32,8 +32,8 @@ int main(void) {
     small[0] = 'x';
     CHECK(gm_room_code_generate(small, 0) == GM_ROOM_BUFFER_TOO_SMALL);
     CHECK(small[0] == 'x');
-    CHECK(gm_room_code_is_valid("ABCD2345"));
-    CHECK(gm_room_code_is_valid("99999999"));
+    CHECK(gm_room_code_is_valid("ABCD23"));
+    CHECK(gm_room_code_is_valid("999999"));
     for (i = 0; i < (int)(sizeof(bad) / sizeof(bad[0])); ++i) {
         required = 77;
         memcpy(svg, "old data", sizeof("old data"));
@@ -44,34 +44,34 @@ int main(void) {
         CHECK(svg[0] == '\0' && required == 0);
     }
     memset(payload, 'Z', sizeof(payload));
-    CHECK(gm_room_invite_payload("ABCD2345", payload, GM_ROOM_PAYLOAD_CAPACITY) == GM_ROOM_OK);
-    CHECK(strcmp(payload, "gommanna://join?code=ABCD2345") == 0);
+    CHECK(gm_room_invite_payload("ABCD23", payload, GM_ROOM_PAYLOAD_CAPACITY) == GM_ROOM_OK);
+    CHECK(strcmp(payload, "gommanna://join?code=ABCD23") == 0);
     CHECK(payload[GM_ROOM_PAYLOAD_CAPACITY] == 'Z');
-    CHECK(gm_room_invite_payload("ABCD2345", small, 2) == GM_ROOM_BUFFER_TOO_SMALL);
+    CHECK(gm_room_invite_payload("ABCD23", small, 2) == GM_ROOM_BUFFER_TOO_SMALL);
     CHECK(small[0] == '\0' && small[2] == 'Z');
-    CHECK(gm_room_invite_payload("ABCD2345", NULL, 0) == GM_ROOM_INVALID_ARGUMENT);
-    CHECK(gm_room_qr_svg("ABCD2345", NULL, 0, &required) == GM_ROOM_OK);
+    CHECK(gm_room_invite_payload("ABCD23", NULL, 0) == GM_ROOM_INVALID_ARGUMENT);
+    CHECK(gm_room_qr_svg("ABCD23", NULL, 0, &required) == GM_ROOM_OK);
     CHECK(required > 100 && required <= GM_ROOM_QR_SVG_CAPACITY);
-    CHECK(gm_room_qr_svg("ABCD2345", small, 2, &actual) == GM_ROOM_BUFFER_TOO_SMALL);
+    CHECK(gm_room_qr_svg("ABCD23", small, 2, &actual) == GM_ROOM_BUFFER_TOO_SMALL);
     CHECK(actual == required && small[0] == '\0' && small[2] == 'Z');
     exact = (char *)malloc(required + 1);
     CHECK(exact != NULL);
     memset(exact, 'Z', required + 1);
-    CHECK(gm_room_qr_svg("ABCD2345", exact, required - 1, &actual) == GM_ROOM_BUFFER_TOO_SMALL);
+    CHECK(gm_room_qr_svg("ABCD23", exact, required - 1, &actual) == GM_ROOM_BUFFER_TOO_SMALL);
     CHECK(actual == required && exact[0] == '\0' && exact[required - 1] == 'Z');
-    CHECK(gm_room_qr_svg("ABCD2345", exact, required, &actual) == GM_ROOM_OK);
+    CHECK(gm_room_qr_svg("ABCD23", exact, required, &actual) == GM_ROOM_OK);
     CHECK(actual == required && strlen(exact) + 1 == required && exact[required] == 'Z');
     CHECK(strncmp(exact, "<svg ", 5) == 0);
     CHECK(strstr(exact, "<rect width=\"100%\" height=\"100%\" fill=\"#fff\"/>") != NULL);
     CHECK(strstr(exact, "<path fill=\"#000\" d=\"M") != NULL);
     CHECK(strstr(exact, "</svg>\n") != NULL);
-    CHECK(gm_room_qr_svg("ABCD2345", svg, sizeof(svg), &actual) == GM_ROOM_OK);
+    CHECK(gm_room_qr_svg("ABCD23", svg, sizeof(svg), &actual) == GM_ROOM_OK);
     CHECK(strcmp(exact, svg) == 0);
     free(exact);
-    CHECK(gm_room_qr_svg("ABCD2345", svg, sizeof(svg), NULL) == GM_ROOM_INVALID_ARGUMENT);
+    CHECK(gm_room_qr_svg("ABCD23", svg, sizeof(svg), NULL) == GM_ROOM_INVALID_ARGUMENT);
     CHECK(svg[0] == '\0');
     required = 77;
-    CHECK(gm_room_qr_svg("ABCD2345", NULL, 1, &required) == GM_ROOM_INVALID_ARGUMENT);
+    CHECK(gm_room_qr_svg("ABCD23", NULL, 1, &required) == GM_ROOM_INVALID_ARGUMENT);
     CHECK(required == 0);
     puts("PASS: code format, OS RNG, payload, invalid input and SVG buffer boundaries");
     return 0;

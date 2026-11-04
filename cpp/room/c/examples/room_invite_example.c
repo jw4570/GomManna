@@ -9,12 +9,12 @@ int main(int argc, char **argv) {
     size_t required;
     gm_room_status status;
     if (argc > 2) {
-        fprintf(stderr, "Usage: room_invite_example [8-character-code]\n");
+        fprintf(stderr, "Usage: room_invite_example [6-character-code]\n");
         return 2;
     }
     if (argc == 2) {
         if (!gm_room_code_is_valid(argv[1])) {
-            fprintf(stderr, "Invalid code: use 8 characters from %s\n", GM_ROOM_CODE_ALPHABET);
+            fprintf(stderr, "Invalid code: use 6 characters from %s\n", GM_ROOM_CODE_ALPHABET);
             return 2;
         }
         memcpy(code, argv[1], sizeof(code));
