@@ -2,42 +2,39 @@
 
 **우리 곧, 만나요.**
 
-곰만나는 즉석에서 모임을 만들고, 만나는 동안 서로의 위치와 대화를 확인하는 iOS 앱입니다.
-초대 코드나 QR로 같은 방에 모이고, 모임이 끝나면 방을 종료합니다.
-사용자는 동시에 하나의 모임에만 참여하며, 동물 캐릭터로 자신을 표현합니다.
+곰만나는 모임 방에서 일행의 위치와 상세 위치 메모를 공유해 다시 만나기 위한 연락과 대기를 줄이는 iOS 앱입니다.
+6자리 초대 코드 또는 QR로 방에 참여하며, 각자 위치 공유를 켜거나 끌 수 있습니다.
 
 ## 주요 기능
 
-- **모임 만들기·참여:** 모임 이름과 내 이름을 입력하고, 코드 또는 QR로 참여합니다.
-- **위치 확인:** 지도에서 멤버를 확인하고, 하단 패널에서 멤버 목록을 펼쳐봅니다.
-- **지도 마킹:** 지도에서 위치를 선택하고 이름을 지정합니다.
-- **모임 대화:** 같은 모임의 멤버와 메시지를 주고받습니다.
-- **동물 프로필:** 랜덤 기본 캐릭터를 받고, 자신의 캐릭터만 변경합니다.
-- **모임 종료:** 방장이 종료하면 참여 정보·위치·대화·마킹을 삭제하고 프로필은 유지합니다.
+- **모임 만들기·참여:** 초대 코드 또는 QR로 방에 참여합니다.
+- **위치 공유 ON/OFF:** 켜면 같은 방 참가자에게 최신 위치가 보입니다. 끄면 위치·메모·사진이 함께 숨겨집니다.
+- **상세 위치:** 메모에 작성 시각과 당시 위치를 함께 남기고 사진을 첨부합니다.
+- **모임 종료:** 방장이 직접 방을 종료합니다.
 
-위 내용은 서비스의 기능 구성입니다. 실제 연결 여부는 아래 개발 현황을 확인하세요.
+아래 개발 현황은 서버·앱의 연결 상태를 구분합니다. 기존 iOS 화면에 보이는 채팅·지도 마킹 등은 이전 시제품이며 현재 서버의 기능 범위가 아닙니다.
 
 ## 개발 현황
 
 | 영역 | 현재 상태 |
 |---|---|
 | iOS | 인트로·홈·방 생성/참여·지도·설정·초대·프로필·대화 UI와 ViewModel 구현 |
-| 앱 데이터 | 로컬 임시 상태 사용. iOS 앱과 C++ 서버 연결은 아직 진행 전 |
-| QR | 초대 QR 이미지 생성 구현. 카메라를 통한 QR 인식은 미연결 |
-| 위치 | 지도와 샘플 멤버 위치 표시. 실제 GPS 수집·공유와 거리 계산은 미연결 |
-| 서버 | 인증·프로필·모임·위치·대화·마킹 HTTP API 구현 |
-| DB | PostgreSQL 테이블·관계·제약조건·인덱스 정의 |
-| 검증 | C++ 로컬 빌드, 단위 테스트, 임시 PostgreSQL HTTP 통합 테스트 수행 |
-| 배포·실시간 | AWS 배포·실제 Supabase 연결 검증·WebSocket/SSE·푸시 알림은 진행 전 |
+| 앱 데이터 | 기본 Mock 사용. 실제 멤버 조회 연결 코드가 있으며 전체 앱 흐름의 실기기 검증은 남아 있음 |
+| QR | 서버에서 6자리 코드가 들어 있는 QR SVG를 생성. 앱 카메라 인식·딥링크 실행은 미연결 |
+| 위치 | 서버는 테스트 좌표의 저장·조회 및 공유 OFF/ON을 지원. 휴대폰 GPS 수집·공유는 미검증 |
+| 서버 | 익명 세션·방·위치·공유 상태·메모 API 및 사진 저장 연동 구현 |
+| DB | 서버 전용 Supabase PostgreSQL 스키마와 private Storage를 사용 |
+| 검증 | 가상 데이터로 C/C++ 모듈과 실제 Supabase를 이용한 로컬 HTTP 통합 테스트 |
+| 배포 | 외부 기기에서 접근할 서버 주소·HTTPS 구성 및 실기기 검증은 별도 필요 |
 
 ## 기술 구성
 
 | 영역 | 기술 |
 |---|---|
 | iOS | Swift, SwiftUI, Observation, MapKit, Core Image |
-| 서버 | C++20, CMake, cpp-httplib, nlohmann/json, jwt-cpp |
+| 서버 | C++20, C, CMake, cpp-httplib, nlohmann/json, OpenSSL |
 | DB | Supabase PostgreSQL, libpq |
-| 인증 | C++ 서버에서 발급하는 익명 사용자 JWT |
+| 인증 | C++ 서버에서 발급하는 익명 토큰과 SHA-256 해시 |
 | 테스트 | CTest, Python 기반 HTTP·PostgreSQL 통합 테스트 |
 
 데이터 연결 구조는 `iOS 앱 → C++ HTTP API 서버 → Supabase PostgreSQL`입니다.
@@ -54,15 +51,14 @@ GomManna/
 │   ├── Root/                   # 초기 화면 흐름
 │   ├── Features/               # 화면별 View·ViewModel
 │   ├── Models/                 # 기능별 데이터 모델
-│   ├── Shared/                 # 공통 UI
 │   └── Resources/              # 디자인 테마·에셋
-├── server/
+├── cpp/
 │   ├── include/gommanna/       # 서버 인터페이스
-│   ├── src/                    # HTTP·인증·DB 구현
+│   ├── http/                   # HTTP·인증·사진 처리
+│   ├── db/                     # DB 접근 코드
+│   ├── room/                   # 방 서비스와 C 초대 코드·QR
 │   ├── tests/                  # 단위·통합 테스트
-│   ├── scripts/                # 빌드·실행·테스트 스크립트
-│   ├── CMakeLists.txt
-│   └── Dockerfile
+│   └── CMakeLists.txt
 └── supabase/
     ├── migrations/             # 적용할 DB migration
     └── reference/              # 이전 설계 참고 자료, 실행 대상 아님
@@ -79,37 +75,32 @@ GomManna/
 현재 프로젝트의 Deployment Target은 **iOS 27.0**입니다. 해당 SDK와 실행 환경이 필요합니다.
 실기기 실행 시에는 자신의 개발 팀과 서명 설정을 사용합니다.
 
+### Mock 데이터 / 실제 API 전환
+
+`GomManna/App/Configuration/AppEnvironment.swift`의 `dataSource` 한 줄을 변경합니다.
+
+```swift
+static let dataSource: DataSource = .mock // 서버 없이 실행
+// static let dataSource: DataSource = .live // 실제 멤버 조회 API 사용
+```
+
+- Mock 모드: 홈에 5명 모임이 표시됩니다. 위치가 있는 멤버 3명, 공유가 꺼진 멤버 1명, 좌표를 기다리는 멤버 1명을 포함합니다.
+- 데이터 수정: `GomManna/Services/Mock/MockRoomData.swift`에서 이름, 좌표, 공유 상태를 바꿉니다. 새로 만든 방은 그 방의 멤버를 Mock 응답으로 사용합니다. 초대 코드 `SEOUL6`으로 샘플 모임에 참여할 수도 있습니다.
+- 같은 `RoomServiceProtocol` 인터페이스를 사용하므로 DTO → Repository → ViewModel → View 흐름은 두 모드에서 같습니다.
+- Live 모드: Xcode **Product → Scheme → Edit Scheme → Run → Arguments → Environment Variables**에 `GOMMANNA_API_BASE_URL`과 `GOMMANNA_ACCESS_TOKEN`을 설정합니다. 토큰 값은 저장소에 커밋하지 않습니다.
+- 실제 서버에서 받은 방 ID, 멤버 ID와 방장 정보가 있는 `Room`을 화면에 전달해야 합니다. 현재 방 생성·코드 참여는 로컬 UI 단계이며, `.live` 전환은 멤버 조회만 대상으로 합니다. 로컬 생성 UUID를 실제 서버 ID로 사용할 수 없습니다.
+
 ### 서버·DB
 
 상세 설정과 API 명세는 다음 문서를 확인합니다.
 
-- [서버 실행·환경 변수·API·테스트](server/README.md)
+- [서버 실행·환경 변수·API·테스트](cpp/http/README.md)
 - [DB 구조와 migration 적용 안내](supabase/README.md)
-- [초기 테이블 생성 SQL](supabase/migrations/202610290001_gommanna.sql)
+- [앱 연동 API 상세 규격](cpp/http/API.md)
 
-macOS에서 프로젝트 루트를 기준으로 실행합니다.
-
-```bash
-brew install --formula cmake postgresql@17
-cd server
-./scripts/build.sh
-cp .env.example .env
-openssl rand -hex 32
-```
-
-`.env`에 `DATABASE_URL`과 생성한 `AUTH_SECRET`을 설정하고, DB 테이블을 준비한 뒤 실행합니다.
-
-```bash
-./scripts/run.sh
-```
-
-서버 테스트는 `server` 폴더에서 실행합니다.
-
-```bash
-./scripts/test.sh
-```
-
-통합 테스트는 별도의 임시 PostgreSQL을 사용합니다. 실제 Supabase 데이터는 수정하지 않습니다.
+이전 public 스키마 SQL `202610290001_gommanna.sql`은 참고용이며 현재
+`gommanna` private 스키마에 무작정 실행하지 않습니다. 실제 DB 통합시험은
+테스트용 Supabase 프로젝트에 가상 계정과 종료된 방 기록을 남길 수 있습니다.
 
 ## 협업 흐름·브랜치 규칙
 

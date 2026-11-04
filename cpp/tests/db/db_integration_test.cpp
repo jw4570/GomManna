@@ -32,7 +32,7 @@ std::string hash_for(std::uint64_t n) {
 }
 std::string code_for(std::uint64_t n) {
     constexpr char alphabet[]="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    std::string code(8,'A');
+    std::string code(6,'A');
     for(char& c : code) { c=alphabet[n%32]; n/=32; }
     return code;
 }
