@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-#define GM_ROOM_CODE_LENGTH 8
+#define GM_ROOM_CODE_LENGTH 6
 #define GM_ROOM_CODE_CAPACITY (GM_ROOM_CODE_LENGTH + 1)
 #define GM_ROOM_CODE_ALPHABET "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 #define GM_ROOM_INVITE_PREFIX "gommanna://join?code="
@@ -29,7 +29,7 @@ typedef enum gm_room_status {
  * On failure, an available output buffer is set to an empty string. */
 gm_room_status gm_room_code_generate(char *output, size_t capacity);
 
-/* Strict server format: exactly eight characters from GM_ROOM_CODE_ALPHABET.
+/* Strict server format: exactly six characters from GM_ROOM_CODE_ALPHABET.
  * Accepts a NUL-terminated string or NULL. No trimming/case conversion. */
 int gm_room_code_is_valid(const char *code);
 

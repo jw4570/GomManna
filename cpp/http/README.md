@@ -17,9 +17,17 @@ cmake --build build/cpp --config Release
 
 기본 주소 `127.0.0.1:8080`은 같은 컴퓨터에서만 사용할 수 있다. 실제 아이폰에서 호출할 수 있는 네트워크 연결과 HTTPS 구성은 별도로 검증해야 한다.
 
-## 방 모듈을 기다리는 동안
+## 방과 사진
 
-서영의 `cpp/room` 모듈이 없으면 기본 빌드는 중단된다. **DB와 HTTP 통합시험에 한해** 첫 명령에 `-DGOMMANNA_TEST_WITHOUT_ROOM_SERVICE=ON`을 추가할 수 있다. 이 시험 설정에서는 실제 Supabase에 연결하지만, 방 생성·참가·초대·나가기·종료 API는 모두 `501 NOT_IMPLEMENTED`다. 기존 방의 조회·위치·메모 API는 사용할 수 있다. 방 모듈이 병합되면 실제 `gm_room`을 사용하며 이 설정 없이 다시 빌드한다.
+서영의 C 초대 코드·QR 모듈을 `gm_room` 서비스가 호출하고, 이 서비스가
+`IRepository`로 방을 생성·참가·탈퇴·종료한다. 새 초대 코드는 6자리다.
+이미 종료된 8자리 시험 방은 DB 기록으로만 보존된다.
+
+사진을 사용하려면 `GOMMANNA_STORAGE_URL`, `GOMMANNA_STORAGE_SECRET`,
+`GOMMANNA_STORAGE_BUCKET`을 서버 전용으로 설정한다. Storage HTTPS 인증서가
+자동으로 발견되지 않는 환경에서는 공개 CA 묶음 경로를 `GOMMANNA_STORAGE_CA_FILE`로
+지정한다. 버킷은 반드시 비공개여야 한다. 비밀키는 저장소나 iOS 앱에 넣지 않는다.
+사진 설정이 없으면 사진 API는 503이며 나머지 API는 동작한다.
 
 ## 앱에서 사용할 주요 API
 
@@ -28,13 +36,22 @@ cmake --build build/cpp --config Release
 | 메서드·경로 | 용도 |
 |---|---|
 | POST `/v1/guests` | 익명 사용자와 토큰 발급 |
+| POST `/v1/rooms` | 방 생성과 방장 참가 |
+| POST `/v1/rooms/join` | 6자리 초대 코드로 참가 |
 | GET `/v1/rooms/{room_id}` | 참가 중인 방 조회 |
 | GET `/v1/rooms/{room_id}/members` | 참가자의 공유 상태·위치·메모 조회 |
+| GET `/v1/rooms/{room_id}/invite` | 코드·초대 링크·QR SVG 조회 |
+| POST `/v1/rooms/{room_id}/leave` | 일반 참가자 탈퇴 |
+| POST `/v1/rooms/{room_id}/end` | 방장에 의한 방 종료 |
 | PUT `/v1/rooms/{room_id}/sharing` | 내 위치 공유 ON/OFF |
 | PUT `/v1/rooms/{room_id}/location` | 내 좌표·시각·공유 epoch·순서 저장 |
 | PUT / DELETE `/v1/rooms/{room_id}/note` | 내 메모 저장·삭제 |
+| PUT `/v1/rooms/{room_id}/note/photo` | 내 메모에 JPEG/PNG 사진 첨부 |
+| GET `/v1/rooms/{room_id}/members/{member_id}/photo` | 같은 방의 공개된 사진 조회 |
 
-멤버 조회의 `location`은 현재 위치, `note.origin`은 메모 작성 당시 위치다. 공유 OFF 또는 이전 epoch의 위치·메모는 `null`이다. 사진 API는 아직 `501`이다. 세부 필드와 방 API는 팀 공통 연동 규격을 따른다.
+멤버 조회의 `location`은 현재 위치, `note.origin`은 메모 작성 당시 위치다.
+공유 OFF 또는 이전 epoch의 위치·메모·사진은 숨긴다. 요청과 응답의 구체적인
+예시는 [앱 연동 API](API.md)를 참고한다.
 
 다음은 `GET /v1/rooms/{room_id}/members`의 가상 응답이다. `location_status`는 `off`, `no_data`, `fresh`, `delayed`, `stale` 중 하나다.
 
@@ -74,4 +91,7 @@ cmake --build build/cpp --config Release
 
 별도의 **테스트 프로젝트**에서만 실행한다. 빌드 설정에 `-DGOMMANNA_BUILD_HTTP_DB_TESTS=ON`을 추가하고 Python 3를 준비한다. `GOMMANNA_ENV_FILE`에 테스트용 `.env` 경로와 `GOMMANNA_RUN_HTTP_DB_INTEGRATION=1`을 설정한 뒤 `ctest --test-dir build/cpp -C Release --output-on-failure`를 실행한다. 변수가 없으면 실제 DB 시험은 건너뛴다.
 
-시험은 가상의 계정·방·위치를 생성하고 종료한다. 테스트용 사용자와 종료된 방 기록이 남을 수 있다. 방 모듈이 없는 시험에서는 방 생성·참가를 API가 아니라 DB 시험용 도구로 준비하므로, 방 API의 실제 연동 성공을 의미하지 않는다.
+시험은 HTTP API로 가상의 계정·방·위치를 생성하고 종료한다. 테스트용 사용자와
+종료된 방 기록이 남을 수 있다. 사진까지 시험하려면 비공개 Storage 설정과
+`GOMMANNA_RUN_PHOTO_INTEGRATION=1`을 추가한다. 이 옵션이 없으면 사진 경로는
+실제 Storage와 시험하지 않는다.

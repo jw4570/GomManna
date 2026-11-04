@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 # Can be built independently while the shared server CMake is being prepared.
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-  project(gommanna_db LANGUAGES CXX)
+  project(gommanna_db LANGUAGES C CXX)
   include(CTest)
 endif()
 
@@ -12,9 +12,12 @@ if(NOT TARGET gm_contract)
 endif()
 
 find_package(PostgreSQL 17 REQUIRED)
+if(NOT TARGET gm_geo)
+  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../geo ${CMAKE_CURRENT_BINARY_DIR}/geo)
+endif()
 add_library(gm_db STATIC postgres_repository.cpp)
 target_compile_features(gm_db PUBLIC cxx_std_20)
-target_link_libraries(gm_db PUBLIC gm_contract PRIVATE PostgreSQL::PostgreSQL)
+target_link_libraries(gm_db PUBLIC gm_contract PRIVATE gm_geo PostgreSQL::PostgreSQL)
 if(MSVC)
   target_compile_options(gm_db PRIVATE /utf-8 /W4)
 else()
