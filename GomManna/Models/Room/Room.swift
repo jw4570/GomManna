@@ -1,12 +1,15 @@
 import Foundation
 
 struct RoomMember: Identifiable, Hashable {
-    var id = UUID()
+    var id: UUID
+    var userID: UUID
     var name: String
-    var character: AnimalCharacter = .random()
-    var isHost = false
-    var latitude: Double = 37.5665
-    var longitude: Double = 126.9780
+    var character: AnimalCharacter
+    var isHost: Bool
+    var isSharing: Bool
+    
+    var latitude: Double?
+    var longitude: Double?
 }
 
 struct Room: Identifiable, Hashable {
@@ -18,12 +21,5 @@ struct Room: Identifiable, Hashable {
     var members: [RoomMember]
     var myMemberID: UUID
 
-    static let sample: Room = {
-        let me = RoomMember(name: "나", isHost: true)
-        return Room(title: "오늘, 서울 산책", code: "SEOUL6", myName: "나", isHost: true, members: [
-            me,
-            RoomMember(name: "주원", latitude: 37.5680, longitude: 126.9760),
-            RoomMember(name: "서영", latitude: 37.5650, longitude: 126.9800)
-        ], myMemberID: me.id)
-    }()
+    static var sample: Room { MockRoomData.room }
 }

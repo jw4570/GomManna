@@ -79,6 +79,21 @@ GomManna/
 현재 프로젝트의 Deployment Target은 **iOS 27.0**입니다. 해당 SDK와 실행 환경이 필요합니다.
 실기기 실행 시에는 자신의 개발 팀과 서명 설정을 사용합니다.
 
+### Mock 데이터 / 실제 API 전환
+
+`GomManna/App/Configuration/AppEnvironment.swift`의 `dataSource` 한 줄을 변경합니다.
+
+```swift
+static let dataSource: DataSource = .mock // 서버 없이 실행
+// static let dataSource: DataSource = .live // 실제 멤버 조회 API 사용
+```
+
+- Mock 모드: 홈에 5명 모임이 표시됩니다. 위치가 있는 멤버 3명, 공유가 꺼진 멤버 1명, 좌표를 기다리는 멤버 1명을 포함합니다.
+- 데이터 수정: `GomManna/Services/Mock/MockRoomData.swift`에서 이름, 좌표, 공유 상태를 바꿉니다. 새로 만든 방은 그 방의 멤버를 Mock 응답으로 사용합니다. 초대 코드 `SEOUL6`으로 샘플 모임에 참여할 수도 있습니다.
+- 같은 `RoomServiceProtocol` 인터페이스를 사용하므로 DTO → Repository → ViewModel → View 흐름은 두 모드에서 같습니다.
+- Live 모드: Xcode **Product → Scheme → Edit Scheme → Run → Arguments → Environment Variables**에 `GOMMANNA_API_BASE_URL`과 `GOMMANNA_ACCESS_TOKEN`을 설정합니다. 토큰 값은 저장소에 커밋하지 않습니다.
+- 실제 서버에서 받은 방 ID, 멤버 ID와 방장 정보가 있는 `Room`을 화면에 전달해야 합니다. 현재 방 생성·코드 참여는 로컬 UI 단계이며, `.live` 전환은 멤버 조회만 대상으로 합니다. 로컬 생성 UUID를 실제 서버 ID로 사용할 수 없습니다.
+
 ### 서버·DB
 
 상세 설정과 API 명세는 다음 문서를 확인합니다.

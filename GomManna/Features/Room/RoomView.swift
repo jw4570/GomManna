@@ -4,8 +4,20 @@ import MapKit
 struct RoomView: View {
     let room: Room
     let onRemove: () -> Void
-    @State private var model = RoomViewModel()
+    @State private var model: RoomViewModel
     @State private var profile = ProfileViewModel.shared
+    init(room: Room, model: RoomViewModel? = nil, onRemove: @escaping () -> Void) {
+        self.room = room
+        self.onRemove = onRemove
+        _model = State(initialValue: model ?? RoomViewModel(members: room.members))
+    }
+
+    private var currentRoom: Room {
+        var current = room
+        current.members = model.members
+        return current
+    }
+
     var body: some View {
         GeometryReader { geometry in
             let bottomInset = geometry.safeAreaInsets.bottom
@@ -43,6 +55,7 @@ struct RoomView: View {
             .coordinateSpace(name: "roomPanelContainer")
             .clipped()
         }
+        .task(id: room.id) { await model.loadMembers(room: room) }
         .navigationTitle(room.title).navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -56,20 +69,22 @@ struct RoomView: View {
         } message: {
             Text("선택한 장소의 이름을 정해주세요.")
         }
-        .sheet(isPresented: $model.showingChat) { ChatView(room: room, model: model.chat) }
+        .sheet(isPresented: $model.showingChat) { ChatView(room: currentRoom, model: model.chat) }
         .sheet(isPresented: $model.showingProfile) { ProfileView() }
-        .sheet(isPresented: $model.showingSettings) { RoomSettingsView(room: room, onRemove: onRemove) }
+        .sheet(isPresented: $model.showingSettings) { RoomSettingsView(room: currentRoom, onRemove: onRemove) }
     }
     private var roomMap: some View {
         MapReader { proxy in
             Map(position: $model.camera) {
-                ForEach(room.members) { member in
-                    Annotation(member.name, coordinate: CLLocationCoordinate2D(latitude: member.latitude, longitude: member.longitude)) {
-                        Button { model.focus(member) } label: {
-                            MemberAvatar(character: member.id == room.myMemberID ? profile.character : member.character)
-                                .overlay(Circle().stroke(model.selectedMember == member.id ? AppStyle.accent : .white, lineWidth: 3))
-                                .shadow(color: .black.opacity(0.12), radius: 5, y: 3)
-                        }.buttonStyle(.plain).allowsHitTesting(!model.isMarking)
+                ForEach(model.members) { member in
+                    if let coordinate = model.coordinate(for: member) {
+                        Annotation(member.name, coordinate: coordinate) {
+                            Button { model.focus(member) } label: {
+                                MemberAvatar(character: member.id == room.myMemberID ? profile.character : member.character)
+                                    .overlay(Circle().stroke(model.selectedMember == member.id ? AppStyle.accent : .white, lineWidth: 3))
+                                    .shadow(color: .black.opacity(0.12), radius: 5, y: 3)
+                            }.buttonStyle(.plain).allowsHitTesting(!model.isMarking)
+                        }
                     }
                 }
                 ForEach(model.marks) { mark in
@@ -119,7 +134,7 @@ struct RoomView: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 5) {
                             Text("함께하는 멤버").font(.headline)
-                            Text("\(room.members.count)명 · 샘플 위치").font(.caption).foregroundStyle(.secondary)
+                            Text("\(model.members.count)명").font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
                     }
@@ -156,7 +171,10 @@ struct RoomView: View {
             // 패널과 목록 크기를 고정하고 전체 위치만 이동해 레이아웃 피드백을 막습니다.
             ScrollView {
                 VStack(spacing: 6) {
-                    ForEach(room.members) { member in
+                    if let errorMessage = model.errorMessage {
+                        Text(errorMessage).font(.caption).foregroundStyle(.red)
+                    }
+                    ForEach(model.members) { member in
                         HStack(spacing: 14) {
                             if member.id == room.myMemberID {
                                 Button { model.showingProfile = true } label: {
@@ -182,9 +200,15 @@ struct RoomView: View {
                                             .foregroundStyle(AppStyle.accent)
                                     }
                                     Spacer()
-                                    Image(systemName: "location").foregroundStyle(AppStyle.accent)
+                                    if model.coordinate(for: member) != nil {
+                                        Image(systemName: "location").foregroundStyle(AppStyle.accent)
+                                    } else {
+                                        Text(member.isSharing ? "위치 확인 중" : "위치 공유 꺼짐")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
                                 }.contentShape(Rectangle())
                             }.buttonStyle(.plain)
+                            .disabled(model.coordinate(for: member) == nil)
                         }.padding(.vertical, 8)
                     }
                 }.padding(.horizontal, 24).padding(.bottom, bottomInset + 18)
