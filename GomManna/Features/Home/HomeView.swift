@@ -2,10 +2,11 @@ import SwiftUI
 
 struct HomeView: View {
     @State private var model: HomeViewModel
+    @Environment(\.scenePhase) private var scenePhase
     @State private var profile = ProfileViewModel.shared
 
-    init(room: Room? = nil) {
-        _model = State(initialValue: HomeViewModel(currentRoom: room))
+    init(session: AppSession? = nil) {
+        _model = State(initialValue: HomeViewModel(session: session ?? .shared))
     }
 
     var body: some View {
@@ -19,6 +20,19 @@ struct HomeView: View {
                                 Text("지금 함께하는 사람들").font(.subheadline).foregroundStyle(.secondary)
                             }
                             currentRoomCard(room)
+                            if model.session.locationSharing.enabled {
+                                HStack(spacing: 12) {
+                                    Label(model.session.locationSharing.device.isRunning ? "위치 공유 중 · 화면을 잠가도 계속돼요" : "위치 공유 대기 · 권한을 확인해 주세요", systemImage: "location.fill")
+                                        .font(.caption)
+                                    Spacer()
+                                    Button("끄기") {
+                                        Task {
+                                            do { try await model.session.setSharing(false, roomID: room.id) }
+                                            catch { if !error.isRequestCancellation { model.session.errorMessage = model.session.describe(error) } }
+                                        }
+                                    }.font(.subheadline.bold())
+                                }.padding(16).background(AppStyle.accentSoft, in: RoundedRectangle(cornerRadius: 18))
+                            }
                             Button { model.showingInvite = true } label: {
                                 HStack(spacing: 14) {
                                     Image(systemName: "qrcode").font(.title2).foregroundStyle(AppStyle.accent)
@@ -49,6 +63,7 @@ struct HomeView: View {
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 10) {
+                    if model.session.recoveryNeeded { IdentityRecoveryButton(session: model.session) }
                     if model.currentRoom != nil {
                         PrimaryButton(title: "모임으로 돌아가기") { model.openCurrentRoom() }
                     } else {
@@ -58,19 +73,29 @@ struct HomeView: View {
                 }.padding(.horizontal, 24).padding(.vertical, 14).background(AppStyle.background)
             }
             .background(AppStyle.background)
+            .task(id: scenePhase) {
+                if scenePhase == .active { await model.refresh(); model.acceptInvite() }
+            }
+            .refreshable { await model.refresh() }
+            .onChange(of: model.session.inviteCode) { _, _ in model.acceptInvite() }
+            .onChange(of: model.currentRoom?.id) { _, id in if id == nil { model.path.removeAll() } }
+            .alert("안내", isPresented: Binding(get: { model.session.errorMessage != nil }, set: { if !$0 { model.session.errorMessage = nil } })) {
+                Button("확인") { model.session.errorMessage = nil }
+            } message: { Text(model.session.errorMessage ?? "") }
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: UUID.self) { id in
                 if let room = model.currentRoom, room.id == id {
-                    RoomView(room: room) { model.remove(room) }
+                    RoomView(room: room, session: model.session) { model.remove(room) }
                 }
             }
+            .sheet(isPresented: $model.showingSettings) { SettingsView(session: model.session) }
             .sheet(isPresented: $model.showingProfile) { ProfileView() }
-            .sheet(isPresented: $model.showingCreate) { CreateRoomView(onCreate: model.enter) }
-            .sheet(isPresented: $model.showingJoin) { JoinRoomView(rooms: [], onJoin: model.enter) }
+            .sheet(isPresented: $model.showingCreate) { CreateRoomView(session: model.session, onCreate: model.enter) }
+            .sheet(isPresented: $model.showingJoin, onDismiss: { model.session.inviteCode = nil }) { JoinRoomView(session: model.session, onJoin: model.enter) }
             .sheet(isPresented: $model.showingInvite) {
                 if let room = model.currentRoom {
                     NavigationStack {
-                        InviteCodeView(room: room)
+                        InviteCodeView(room: room, session: model.session)
                             .toolbar {
                                 ToolbarItem(placement: .confirmationAction) {
                                     Button("완료") { model.showingInvite = false }
@@ -87,6 +112,10 @@ struct HomeView: View {
             BrandMark(size: 27)
             Text("곰만나").font(.title3.bold())
             Spacer()
+            Button { model.showingSettings = true } label: {
+                Image(systemName: "gearshape").font(.title3.weight(.semibold))
+                    .foregroundStyle(AppStyle.accent).frame(width: 44, height: 44)
+            }.buttonStyle(.plain).accessibilityLabel("앱 설정")
             Button { model.showingProfile = true } label: {
                 MemberAvatar(character: profile.character)
             }.buttonStyle(.plain).accessibilityLabel("내 프로필 변경")
@@ -134,5 +163,4 @@ struct HomeView: View {
     }
 }
 
-#Preview("모임 없음") { HomeView() }
-#Preview("모임 참여 중") { HomeView(room: .sample) }
+#Preview { HomeView(session: .preview()) }
