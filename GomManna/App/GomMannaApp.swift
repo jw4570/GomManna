@@ -9,10 +9,15 @@ import SwiftUI
 
 @main
 struct GomMannaApp: App {
+    @AppStorage("GomManna.appearance") private var appearance = "system"
+    private var colorScheme: ColorScheme? {
+        appearance == "dark" ? .dark : appearance == "light" ? .light : nil
+    }
     var body: some Scene {
         WindowGroup {
             RootView()
                 .tint(AppStyle.accent)
+                .preferredColorScheme(colorScheme)
         }
     }
 }
