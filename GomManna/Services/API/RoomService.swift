@@ -1,70 +1,57 @@
 import Foundation
 
-struct APIRequestError: LocalizedError {
-    let statusCode: Int
-    let message: String
-    
-    var errorDescription: String? { message }
-}
-
+// 기존 Repository와 Mock이 사용하는 멤버 조회 인터페이스를 유지합니다.
+@MainActor
 protocol RoomServiceProtocol {
     func fetchMembers(roomID: UUID, token: String) async throws -> [MemberDTO]
 }
 
-struct RoomService: RoomServiceProtocol {
-    let baseURL: URL
-    private let session: URLSession
-    
-    init(
-        baseURL: URL,
-        session: URLSession = .shared
-    ) {
-        self.baseURL = baseURL
-        self.session = session
+protocol RoomManagingServiceProtocol: RoomServiceProtocol {
+    func createRoom(title: String, nickname: String, token: String) async throws -> RoomMembershipData
+    func joinRoom(inviteCode: String, nickname: String, token: String) async throws -> RoomMembershipData
+    func fetchRoom(roomID: UUID, token: String) async throws -> RoomDTO
+    func fetchInvite(roomID: UUID, token: String) async throws -> InviteDTO
+    func leaveRoom(roomID: UUID, token: String) async throws
+    func endRoom(roomID: UUID, token: String) async throws
+}
+
+struct RoomService: RoomManagingServiceProtocol {
+    private let client: APIClient
+    init(baseURL: URL, session: URLSession = .shared) { client = APIClient(baseURL: baseURL, session: session) }
+
+    func createRoom(title: String, nickname: String, token: String) async throws -> RoomMembershipData {
+        let request = try client.jsonRequest(path: "v1/rooms", method: "POST", token: token,
+                                            body: CreateRoomRequest(title: title, nickname: nickname))
+        return try await client.send(request, as: RoomMembershipData.self)
     }
-    
-    func fetchMembers(
-        roomID: UUID,
-        token: String
-    ) async throws -> [MemberDTO] {
-        let url = baseURL.appending(
-            path: "v1/rooms/\(roomID.uuidString)/members"
-        )
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.timeoutInterval = 15
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        
-        request.setValue(
-            "Bearer \(token)",
-            forHTTPHeaderField: "Authorization"
-        )
-        
-        let (data, response) = try await session.data(for: request)
-        
-        guard let response = response as? HTTPURLResponse else {
-            throw URLError(.badServerResponse)
-        }
-        
-        let decoder = JSONDecoder()
-        
-        guard (200..<300).contains(response.statusCode) else {
-            let failure = try? decoder.decode(APIResponse<MembersData>.self, from: data
-            )
-            
-            throw APIRequestError(
-                statusCode: response.statusCode,
-                message: failure?.error?.message ?? "멤버 정보를 가져오지 못했어요."
-            )
-        }
-        
-        let result = try decoder.decode(APIResponse<MembersData>.self, from: data)
-        
-        guard result.ok, let payload = result.data else {
-            throw APIRequestError(statusCode: response.statusCode, message: result.error?.message ?? "응답 데이터를 확인해주세요.")
-        }
-        
-        return payload.members
+
+    func joinRoom(inviteCode: String, nickname: String, token: String) async throws -> RoomMembershipData {
+        let request = try client.jsonRequest(path: "v1/rooms/join", method: "POST", token: token,
+                                            body: JoinRoomRequest(inviteCode: inviteCode, nickname: nickname))
+        return try await client.send(request, as: RoomMembershipData.self)
+    }
+
+    func fetchRoom(roomID: UUID, token: String) async throws -> RoomDTO {
+        let data = try await client.send(client.request(path: "v1/rooms/\(roomID)", token: token), as: RoomData.self)
+        return data.room
+    }
+
+    func fetchMembers(roomID: UUID, token: String) async throws -> [MemberDTO] {
+        let data = try await client.send(client.request(path: "v1/rooms/\(roomID)/members", token: token), as: MembersData.self)
+        return data.members
+    }
+
+    func fetchInvite(roomID: UUID, token: String) async throws -> InviteDTO {
+        try await client.send(client.request(path: "v1/rooms/\(roomID)/invite", token: token), as: InviteDTO.self)
+    }
+
+    func leaveRoom(roomID: UUID, token: String) async throws {
+        let request = try client.jsonRequest(path: "v1/rooms/\(roomID)/leave", method: "POST", token: token, body: EmptyData())
+        _ = try await client.send(request, as: EmptyData.self)
+    }
+
+    func endRoom(roomID: UUID, token: String) async throws {
+        let request = try client.jsonRequest(path: "v1/rooms/\(roomID)/end", method: "POST", token: token, body: EmptyData())
+        _ = try await client.send(request, as: EmptyData.self)
     }
 }

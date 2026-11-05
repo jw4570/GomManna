@@ -10,6 +10,11 @@ struct RoomMember: Identifiable, Hashable {
     
     var latitude: Double?
     var longitude: Double?
+    var sharingEpoch: Int64 = 0
+    var locationStatus: LocationStatus? = nil
+    var capturedAtMs: Int64? = nil
+    var locationSequence: Int64? = nil
+    var note: MemberNote? = nil
 }
 
 struct Room: Identifiable, Hashable {
