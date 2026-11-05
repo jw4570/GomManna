@@ -1,36 +1,33 @@
 import Foundation
 import Observation
 
-/// UI 확인용 메모리 상태. 동시에 하나의 모임만 참여합니다.
+@MainActor
 @Observable final class HomeViewModel {
-    private(set) var currentRoom: Room?
+    let session: AppSession
+    var currentRoom: Room? { session.current?.room }
     var path: [UUID] = []
     var showingCreate = false
     var showingJoin = false
     var showingProfile = false
+    var showingSettings = false
     var showingInvite = false
-
-    init(currentRoom: Room? = nil) {
-        self.currentRoom = currentRoom
-    }
-
-    func enter(_ room: Room) {
-        showingCreate = false
-        showingJoin = false
-        // 이미 참여 중이면 다른 모임으로 덮어쓰지 않습니다.
-        if currentRoom == nil { currentRoom = room }
-        openCurrentRoom()
-    }
-
+    init(session: AppSession? = nil) { self.session = session ?? .shared }
+    func enter(_ room: Room) { showingCreate = false; showingJoin = false; openCurrentRoom() }
     func openCurrentRoom() {
-        guard let currentRoom else { return }
-        path = [currentRoom.id]
+        guard let room = currentRoom else { return }
+        path = [room.id]
     }
-
-    func remove(_ room: Room) {
-        guard currentRoom?.id == room.id else { return }
-        showingInvite = false
-        path.removeAll()
-        currentRoom = nil
+    func remove(_ room: Room) { showingInvite = false; path.removeAll() }
+    func refresh() async {
+        do { try await session.refresh() }
+        catch {
+            guard !Task.isCancelled, !error.isRequestCancellation else { return }
+            session.errorMessage = session.describe(error)
+        }
+    }
+    func acceptInvite() {
+        guard session.inviteCode != nil else { return }
+        if currentRoom == nil { showingJoin = true }
+        else { session.errorMessage = "현재 모임에서 나간 뒤 다른 모임에 참여할 수 있어요." }
     }
 }

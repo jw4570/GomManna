@@ -10,8 +10,3 @@ struct APIErrorDTO: Decodable {
     let code: String
     let message: String
 }
-
-struct RoomDTO: Decodable {
-    let title: String
-    let inviteCode: String
-}

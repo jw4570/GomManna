@@ -19,7 +19,7 @@ enum MockRoomData {
             RoomMember(id: id(5), userID: id(105), name: "지우", character: .penguin, isHost: false,
                        isSharing: true, latitude: nil, longitude: nil)
         ]
-        return Room(id: id(1000), title: "오늘, 서울 산책", code: "SEOUL6", myName: "나",
+        return Room(id: id(1000), title: "오늘, 서울 산책", code: "ABCD23", myName: "나",
                     isHost: true, members: members, myMemberID: members[0].id)
     }()
 }
