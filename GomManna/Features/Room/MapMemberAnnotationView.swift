@@ -82,12 +82,19 @@ struct MapMemberAnnotationView: View {
                 .overlay(Circle().stroke(selected ? AppStyle.accent : .white, lineWidth: 3))
                 .shadow(color: .black.opacity(0.12), radius: 5, y: 3)
                 .overlay(alignment: .top) {
-                    Text(member.name)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(selected ? AppStyle.accent : .primary)
-                        .lineLimit(1)
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(AppStyle.background, in: Capsule())
+                    VStack(spacing: 2) {
+                        Text(member.name)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(selected ? AppStyle.accent : .primary)
+                            .lineLimit(1)
+                        if selected {
+                            Text(model.distanceLabel(to: member))
+                                .font(.system(size: 10)).foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(AppStyle.background, in: RoundedRectangle(cornerRadius: 10))
                         .frame(width: 104)
                         .offset(y: 50)
                         .allowsHitTesting(false)
@@ -97,6 +104,8 @@ struct MapMemberAnnotationView: View {
         .buttonStyle(.plain)
         .contentShape(Circle())
         .accessibilityLabel("\(member.name) 위치\(member.note?.photoAvailable == true ? (photoExpanded ? ", 사진 접기" : ", 사진 보기") : "")")
+        .accessibilityValue(selected ? model.distanceLabel(to: member) : "")
+        .accessibilityAddTraits(selected ? .isSelected : [])
         // 지도 주석 크기는 프로필로 고정하고 말풍선은 측정 크기에 포함하지 않습니다.
         .frame(width: 44, height: 44)
         .overlay(alignment: .top) {
