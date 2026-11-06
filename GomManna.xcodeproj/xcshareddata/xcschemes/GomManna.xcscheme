@@ -52,7 +52,7 @@
       <EnvironmentVariables>
          <EnvironmentVariable
             key = "GOMMANNA_API_BASE_URL"
-            value = "https://32.236.33.77"
+            value = "https://43.200.162.52"
             isEnabled = "YES">
          </EnvironmentVariable>
       </EnvironmentVariables>
