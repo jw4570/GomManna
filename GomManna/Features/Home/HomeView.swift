@@ -17,12 +17,11 @@ struct HomeView: View {
                         if let room = model.currentRoom {
                             VStack(alignment: .leading, spacing: 10) {
                                 Text("우리 곧, 만나요").font(.system(size: 29, weight: .bold))
-                                Text("지금 함께하는 사람들").font(.subheadline).foregroundStyle(.secondary)
                             }
                             currentRoomCard(room)
                             if model.session.locationSharing.enabled {
                                 HStack(spacing: 12) {
-                                    Label(model.session.locationSharing.device.isRunning ? "위치 공유 중 · 화면을 잠가도 계속돼요" : "위치 공유 대기 · 권한을 확인해 주세요", systemImage: "location.fill")
+                                    Label(model.session.locationSharing.device.isRunning ? "위치 공유 중" : "위치 공유 대기 · 권한을 확인해 주세요", systemImage: "location.fill")
                                         .font(.caption)
                                     Spacer()
                                     Button("끄기") {
