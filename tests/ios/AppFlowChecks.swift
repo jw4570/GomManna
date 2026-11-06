@@ -4,7 +4,7 @@ import Foundation
 @main struct AppFlowChecks {
     @MainActor static func main() async throws {
         let live = CommandLine.arguments.contains("--live")
-        if !live { MapNotePhotoChecks.run(); try await RequestCancellationChecks.run(); try await BackgroundLocationChecks.run() }
+        if !live { try await IntroChecks.run(); RoomMapChecks.run(); MapNotePhotoChecks.run(); try await RequestCancellationChecks.run(); try await BackgroundLocationChecks.run() }
         let service = MockAPIService()
         let url = URL(string: "https://32.236.33.77")!
         func repositories() -> AppRepositories {
