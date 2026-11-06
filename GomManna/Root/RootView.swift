@@ -7,7 +7,7 @@ struct RootView: View {
     @State private var legalDocument: LegalDocument?
     var body: some View {
         ZStack {
-            if !intro.isFinished { IntroView() }
+            if !intro.isFinished { IntroView(model: intro) }
             else if session.ready { HomeView(session: session) }
             else {
                 VStack(spacing: 24) {
@@ -35,7 +35,7 @@ struct RootView: View {
                     .toolbar { ToolbarItem(placement: .confirmationAction) { Button("닫기") { legalDocument = nil } } }
             }
         }
-        .task { async let boot: Void = session.prepare(); await intro.start(); await boot }
+        .task { await session.prepare() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { session.resumeLocationSharingIfNeeded() }
         }
