@@ -1,4 +1,5 @@
 #include "gommanna/contracts.hpp"
+#include "gommanna/data_policy.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -58,7 +59,7 @@ int main() {
         User guest=value(repository->create_guest(hash_for(seed*10+2),now,now+kGuestSessionTtlMs),"create guest");
         User outsider=value(repository->create_guest(hash_for(seed*10+3),now,now+kGuestSessionTtlMs),"create outsider");
         check(value(repository->authenticate_guest(hash_for(seed*10+1),now),"authenticate").id==host.id,"authenticate identity");
-        error(repository->authenticate_guest(hash_for(seed*10+1),now+kGuestSessionTtlMs),ErrorCode::unauthenticated,"expired session");
+        error(repository->authenticate_guest(hash_for(seed*10+1),guest_session_expiry(now)),ErrorCode::unauthenticated,"expired session");
         error(repository->authenticate_guest("bad token",now),ErrorCode::unauthenticated,"invalid session");
         auto room=value(repository->create_room(host.id,"DB test room","이안",code_for(seed),now),"create room");
         check(!room.member.is_sharing && room.member.sharing_epoch==0,"default sharing off");

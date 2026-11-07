@@ -1,4 +1,5 @@
 #include "gommanna/contracts.hpp"
+#include "gommanna/data_policy.hpp"
 
 #include <libpq-fe.h>
 
@@ -104,13 +105,15 @@ std::string number(double value) {
 }
 
 const std::string kRoomColumns =
-    "r.id::text r_id, r.title r_title, r.host_id::text r_host, r.invite_code r_code, "
+    "r.id::text r_id, r.title r_title, coalesce(r.host_id::text,'') r_host, r.invite_code r_code, "
     "r.status r_status, round(extract(epoch from r.created_at)*1000)::bigint r_created, "
     "round(extract(epoch from r.ended_at)*1000)::bigint r_ended ";
 const std::string kMemberColumns =
     "m.id::text m_id, m.room_id::text m_room, m.user_id::text m_user, m.nickname m_name, "
     "m.is_sharing m_sharing, m.sharing_epoch m_epoch, "
-    "round(extract(epoch from m.joined_at)*1000)::bigint m_joined ";
+    "round(extract(epoch from m.joined_at)*1000)::bigint m_joined, "
+    "round(extract(epoch from m.left_at)*1000)::bigint m_left, "
+    "(select u.animal_icon from gommanna.users u where u.id=m.user_id) m_icon ";
 const std::string kLocationColumns =
     "l.latitude l_lat, l.longitude l_lon, l.accuracy_m l_accuracy, "
     "round(extract(epoch from l.captured_at)*1000)::bigint l_captured, "
@@ -138,6 +141,8 @@ Member member_at(PGresult* r, int row) {
     x.user_id=string_at(r,row,"m_user"); x.nickname=string_at(r,row,"m_name");
     x.is_sharing=bool_at(r,row,"m_sharing"); x.sharing_epoch=integer_at(r,row,"m_epoch");
     x.joined_at_ms=integer_at(r,row,"m_joined");
+    if(!is_null(r,row,"m_left")) x.left_at_ms=integer_at(r,row,"m_left");
+    x.animal_icon=string_at(r,row,"m_icon");
     return x;
 }
 Location location_at(PGresult* r, int row) {
@@ -181,6 +186,17 @@ public:
     Result<Unit> reserve_photo_cleanup(const std::string&, TimeMs) override;
     Result<std::vector<std::string>> due_photo_cleanup(TimeMs) override;
     Result<Unit> finish_photo_cleanup(const std::string&) override;
+    Result<User> get_profile(const Id&) override;
+    Result<User> update_profile(const Id&,const std::string&) override;
+    Result<Unit> delete_user(const Id&,TimeMs) override;
+    Result<Unit> delete_member_data(const Id&,const Id&,bool,TimeMs) override;
+    Result<DeviceStatus> update_device_status(const Id&,const Id&,const DeviceStatusDraft&,TimeMs) override;
+    Result<std::vector<MapMark>> list_marks(const Id&,const Id&) override;
+    Result<MapMark> create_mark(const Id&,const Id&,const MapMarkDraft&,TimeMs) override;
+    Result<MapMark> rename_mark(const Id&,const Id&,const Id&,const std::string&,TimeMs) override;
+    Result<Unit> delete_mark(const Id&,const Id&,const Id&) override;
+    Result<RoutePage> get_route(const Id&,const Id&,const Id&,std::int64_t,int,TimeMs) override;
+    Result<Unit> collect_expired_data(TimeMs) override;
 private:
     template<class T, class F> Result<T> guarded(F&& function) {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -214,10 +230,11 @@ private:
         if (!room.active && !allow_ended) reject(ErrorCode::room_closed,"room is closed");
         return room;
     }
-    Member locked_member(const Id& actor, const Id& room) {
+    Member locked_member(const Id& actor, const Id& room, bool allow_left=false) {
         require_text(actor);
         auto r=exec(conn_.get(),"select "+kMemberColumns+
-            "from gommanna.room_members m where m.room_id=$1::uuid and m.user_id=$2::uuid for update",{room,actor});
+            "from gommanna.room_members m where m.room_id=$1::uuid and m.user_id=$2::uuid "
+            "and ($3::boolean or m.left_at is null) for update",{room,actor,allow_left?"true":"false"});
         if (PQntuples(r.get())==0) reject(ErrorCode::forbidden,"not a room member");
         return member_at(r.get(),0);
     }
@@ -225,6 +242,14 @@ private:
         require_text(user);
         auto r=exec(conn_.get(),"select 1 from gommanna.users where id=$1::uuid",{user});
         if (PQntuples(r.get())==0) reject(ErrorCode::unauthenticated,"guest not found");
+    }
+    void refresh_retention(const Id& room,TimeMs now,bool activity=false) {
+        exec(conn_.get(),"update gommanna.rooms r set all_sharing_stopped_at=case "
+            "when exists(select 1 from gommanna.room_members m where m.room_id=r.id and m.left_at is null and m.is_sharing) "
+            "then null when retention_purged and $3::boolean then to_timestamp($2::double precision/1000) "
+            "else coalesce(all_sharing_stopped_at,to_timestamp($2::double precision/1000)) end,"
+            "last_activity_at=case when $3::boolean then to_timestamp($2::double precision/1000) else last_activity_at end,"
+            "retention_purged=false where r.id=$1::uuid",{room,std::to_string(now),activity?"true":"false"});
     }
     PgConnection conn_;
     std::mutex mutex_;
@@ -244,7 +269,7 @@ Result<User> PostgresRepository::create_guest(const std::string& hash, TimeMs no
         auto user=exec(conn_.get(),
             "insert into gommanna.users(created_at) values(to_timestamp($1::double precision/1000)) "
             "returning id::text user_id,round(extract(epoch from created_at)*1000)::bigint created_ms",{std::to_string(now)});
-        User result{string_at(user.get(),0,"user_id"),integer_at(user.get(),0,"created_ms")};
+        User result{string_at(user.get(),0,"user_id"),integer_at(user.get(),0,"created_ms"),"bear",expires};
         exec(conn_.get(),"insert into gommanna.guest_sessions(user_id,token_sha256,created_at,expires_at) "
             "values($1::uuid,$2,to_timestamp($3::double precision/1000),to_timestamp($4::double precision/1000))",
             {result.id,hash,std::to_string(now),std::to_string(expires)});
@@ -257,12 +282,18 @@ Result<User> PostgresRepository::authenticate_guest(const std::string& hash, Tim
     return guarded<User>([&] {
         require_now(now);
         if (!valid_token_hash(hash)) reject(ErrorCode::unauthenticated,"invalid guest session");
-        auto r=exec(conn_.get(),"select u.id::text user_id,round(extract(epoch from u.created_at)*1000)::bigint created_ms "
-            "from gommanna.guest_sessions s join gommanna.users u on u.id=s.user_id "
-            "where s.token_sha256=$1 and s.revoked_at is null and s.expires_at>to_timestamp($2::double precision/1000)",
-            {hash,std::to_string(now)});
+        auto r=exec(conn_.get(),"with renewed as (update gommanna.guest_sessions set "
+            "expires_at=greatest(expires_at,to_timestamp($3::double precision/1000)),"
+            "last_authenticated_at=to_timestamp($2::double precision/1000) "
+            "where token_sha256=$1 and revoked_at is null and expires_at>to_timestamp($2::double precision/1000) "
+            "returning user_id,expires_at) "
+            "select u.id::text user_id,round(extract(epoch from u.created_at)*1000)::bigint created_ms,u.animal_icon,"
+            "round(extract(epoch from s.expires_at)*1000)::bigint expires_ms "
+            "from renewed s join gommanna.users u on u.id=s.user_id",
+            {hash,std::to_string(now),std::to_string(guest_session_expiry(now))});
         if (PQntuples(r.get())==0) reject(ErrorCode::unauthenticated,"invalid guest session");
-        return User{string_at(r.get(),0,"user_id"),integer_at(r.get(),0,"created_ms")};
+        return User{string_at(r.get(),0,"user_id"),integer_at(r.get(),0,"created_ms"),
+            string_at(r.get(),0,"animal_icon"),integer_at(r.get(),0,"expires_ms")};
     });
 }
 
@@ -293,8 +324,9 @@ Result<RoomMembership> PostgresRepository::create_room(const Id& actor, const st
         require_now(now); require_text(title); require_text(name); require_text(code);
         Transaction tx(conn_.get());
         require_user(actor);
-        auto r=exec(conn_.get(),"with added as (insert into gommanna.rooms(title,host_id,invite_code,created_at) "
-            "values(btrim($1),$2::uuid,$3,to_timestamp($4::double precision/1000)) returning *) "
+        auto r=exec(conn_.get(),"with added as (insert into gommanna.rooms(title,host_id,invite_code,created_at,last_activity_at,all_sharing_stopped_at) "
+            "values(btrim($1),$2::uuid,$3,to_timestamp($4::double precision/1000),"
+            "to_timestamp($4::double precision/1000),to_timestamp($4::double precision/1000)) returning *) "
             "select "+kRoomColumns+"from added r",{title,actor,code,std::to_string(now)});
         Room room=room_at(r.get(),0);
         auto m=exec(conn_.get(),"with added as (insert into gommanna.room_members(room_id,user_id,nickname,joined_at) "
@@ -313,16 +345,19 @@ Result<Member> PostgresRepository::join_room(const Id& actor, const Id& room_id,
         locked_room(room_id);
         require_user(actor);
         auto existing=exec(conn_.get(),"select "+kMemberColumns+
-            "from gommanna.room_members m where m.room_id=$1::uuid and m.user_id=$2::uuid",{room_id,actor});
+            "from gommanna.room_members m where m.room_id=$1::uuid and m.user_id=$2::uuid and m.left_at is null",{room_id,actor});
         if(PQntuples(existing.get())!=0) {
             Member result=member_at(existing.get(),0);
             tx.commit();
             return result;
         }
-        auto count=exec(conn_.get(),"select count(*)::text count from gommanna.room_members where room_id=$1::uuid",{room_id});
+        auto count=exec(conn_.get(),"select count(*)::text count from gommanna.room_members where room_id=$1::uuid and left_at is null",{room_id});
         if(integer_at(count.get(),0,"count")>=kMaxRoomMembers) reject(ErrorCode::conflict,"room is full");
         auto r=exec(conn_.get(),"with added as (insert into gommanna.room_members(room_id,user_id,nickname,joined_at) "
-            "values($1::uuid,$2::uuid,btrim($3),to_timestamp($4::double precision/1000)) returning *) "
+            "values($1::uuid,$2::uuid,btrim($3),to_timestamp($4::double precision/1000)) "
+            "on conflict(room_id,user_id) do update set left_at=null,is_sharing=false,"
+            "sharing_epoch=room_members.sharing_epoch+1,nickname=excluded.nickname,joined_at=excluded.joined_at,"
+            "battery_percent=null,is_charging=null,device_updated_at=null,device_epoch=null returning *) "
             "select "+kMemberColumns+"from added m",{room_id,actor,name,std::to_string(now)});
         Member result=member_at(r.get(),0);
         tx.commit();
@@ -337,7 +372,9 @@ Result<Unit> PostgresRepository::leave_room(const Id& actor, const Id& room_id, 
         Room room=locked_room(room_id);
         Member member=locked_member(actor,room_id);
         if(room.host_id==actor) reject(ErrorCode::forbidden,"host must end the room");
-        exec(conn_.get(),"delete from gommanna.room_members where id=$1::uuid",{member.id});
+        exec(conn_.get(),"update gommanna.room_members set left_at=to_timestamp($2::double precision/1000),"
+            "is_sharing=false,sharing_epoch=sharing_epoch+1 where id=$1::uuid",{member.id,std::to_string(now)});
+        refresh_retention(room_id,now);
         tx.commit();
         return Unit{};
     });
@@ -353,7 +390,8 @@ Result<Unit> PostgresRepository::end_room(const Id& actor, const Id& room_id, Ti
             if(now<room.created_at_ms) reject(ErrorCode::invalid_argument,"invalid time");
             exec(conn_.get(),"update gommanna.rooms set status='ended',ended_at=to_timestamp($2::double precision/1000) "
                 "where id=$1::uuid",{room_id,std::to_string(now)});
-            exec(conn_.get(),"delete from gommanna.room_members where room_id=$1::uuid",{room_id});
+            exec(conn_.get(),"update gommanna.room_members set is_sharing=false,sharing_epoch=sharing_epoch+1 "
+                "where room_id=$1::uuid",{room_id});
         }
         tx.commit();
         return Unit{};
@@ -367,12 +405,13 @@ Result<std::vector<MemberView>> PostgresRepository::list_visible_members(const I
         locked_room(room_id);
         locked_member(actor,room_id);
         auto r=exec(conn_.get(),"select "+kMemberColumns+", "+kLocationColumns+", "+kNoteColumns+
+            ",m.battery_percent,m.is_charging,m.device_epoch,round(extract(epoch from m.device_updated_at)*1000)::bigint device_ms "
             "from gommanna.room_members m "
             "left join gommanna.member_locations l on l.member_id=m.id and l.room_id=m.room_id "
                 "and m.is_sharing and l.sharing_epoch=m.sharing_epoch "
             "left join gommanna.member_notes n on n.member_id=m.id and n.room_id=m.room_id "
                 "and m.is_sharing and n.sharing_epoch=m.sharing_epoch "
-            "where m.room_id=$1::uuid order by m.joined_at,m.id",{room_id});
+            "where m.room_id=$1::uuid and m.left_at is null order by m.joined_at,m.id",{room_id});
         std::vector<MemberView> members;
         for(int i=0;i<PQntuples(r.get());++i) {
             MemberView view;
@@ -384,6 +423,14 @@ Result<std::vector<MemberView>> PostgresRepository::list_visible_members(const I
                 view.location.reset();
             // SQL filters notes/photos before they leave the database.
             if(!view.member.is_sharing) view.note.reset();
+            if(view.member.is_sharing && !is_null(r.get(),i,"device_ms") &&
+               integer_at(r.get(),i,"device_epoch")==view.member.sharing_epoch) {
+                DeviceStatus d;
+                if(!is_null(r.get(),i,"battery_percent")) d.battery_percent=static_cast<int>(integer_at(r.get(),i,"battery_percent"));
+                if(!is_null(r.get(),i,"is_charging")) d.is_charging=bool_at(r.get(),i,"is_charging");
+                d.updated_at_ms=integer_at(r.get(),i,"device_ms");d.sharing_epoch=view.member.sharing_epoch;
+                view.device_status=d;
+            }
             members.push_back(std::move(view));
         }
         tx.commit();
@@ -402,6 +449,7 @@ Result<Member> PostgresRepository::set_sharing(const Id& actor, const Id& room_i
             "is_sharing=$2::boolean where id=$1::uuid returning *) select "+kMemberColumns+"from changed m",
             {member.id,enabled?"true":"false"});
         Member result=member_at(r.get(),0);
+        refresh_retention(room_id,now,enabled);
         tx.commit();
         return result;
     });
@@ -442,6 +490,17 @@ Result<Location> PostgresRepository::update_location(const Id& actor, const Id& 
              std::to_string(update.captured_at_ms),std::to_string(now),std::to_string(update.sharing_epoch),
              std::to_string(update.sequence)});
         Location result=location_at(r.get(),0);
+        auto route=exec(conn_.get(),"select "+kLocationColumns+
+            "from gommanna.route_points l where l.member_id=$1::uuid order by l.id desc limit 1",{member.id});
+        std::optional<Location> last;
+        if(PQntuples(route.get())) last=location_at(route.get(),0);
+        if(should_store_route(last,result)) {
+            exec(conn_.get(),"insert into gommanna.route_points "
+                "(member_id,room_id,latitude,longitude,accuracy_m,captured_at,received_at,sharing_epoch,sequence) "
+                "select member_id,room_id,latitude,longitude,accuracy_m,captured_at,received_at,sharing_epoch,sequence "
+                "from gommanna.member_locations where member_id=$1::uuid",{member.id});
+        }
+        refresh_retention(room_id,now,true);
         tx.commit();
         return result;
     });
@@ -476,6 +535,7 @@ Result<Note> PostgresRepository::save_note(const Id& actor, const Id& room_id, c
               "photo_key=null,photo_uploaded_at=null returning *) select "+kNoteColumns+"from stored n",
             {member.id,room_id,draft.text,std::to_string(now),latitude,longitude,captured,std::to_string(draft.sharing_epoch)});
         Note result=note_at(r.get(),0);
+        refresh_retention(room_id,now);
         tx.commit();
         return result;
     });
@@ -517,6 +577,7 @@ Result<Note> PostgresRepository::attach_photo(const Id& actor, const Id& room_id
             {member.id,photo.key,std::to_string(photo.uploaded_at_ms)});
         Note result=note_at(stored.get(),0);
         exec(conn_.get(),"delete from gommanna.photo_cleanup where storage_key=$1",{photo.key});
+        refresh_retention(room_id,now);
         tx.commit();
         return result;
     });
@@ -554,6 +615,8 @@ Result<Unit> PostgresRepository::finish_photo_cleanup(const std::string& key) {
     });
 }
 
+#include "postgres_shared_data.inc"
+
 } // namespace
 
 Result<std::unique_ptr<IRepository>> make_postgres_repository(const RepositoryConfig& config) {
@@ -577,6 +640,8 @@ Result<std::unique_ptr<IRepository>> make_postgres_repository(const RepositoryCo
         return Error{ErrorCode::db_unavailable,"database TLS is required"};
     try {
         exec(connection.get(),"set role gommanna_server");
+        auto schema=exec(connection.get(),"select 1 from gommanna.schema_versions where version=2");
+        if(!PQntuples(schema.get())) return Error{ErrorCode::db_unavailable,"database migration required"};
         exec(connection.get(),"set client_encoding to 'UTF8'");
         exec(connection.get(),"set time zone 'UTC'");
         std::unique_ptr<IRepository> repository=std::make_unique<PostgresRepository>(std::move(connection));
