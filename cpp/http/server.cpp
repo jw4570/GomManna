@@ -1,4 +1,5 @@
 #include "gommanna/contracts.hpp"
+#include "gommanna/data_policy.hpp"
 #include "environment.hpp"
 #include "photo_service.hpp"
 #include <httplib.h>
@@ -68,10 +69,20 @@ void rate_limited(httplib::Response& r) {
 template<class T,class F> void output(httplib::Response& r, Result<T> result,F convert,int s=200){if(auto* e=std::get_if<Error>(&result)) fail(r,*e);else success(r,convert(std::get<T>(result)),s);}
 json room(const Room& x){return {{"room_id",x.id},{"title",x.title},{"host_id",x.host_id},{"invite_code",x.invite_code},{"status",x.active?"active":"ended"},{"created_at_ms",x.created_at_ms},{"ended_at_ms",x.ended_at_ms}};}
 json member(const Member& x){return {{"member_id",x.id},{"room_id",x.room_id},{"user_id",x.user_id},{"nickname",x.nickname},{"is_sharing",x.is_sharing},{"sharing_epoch",x.sharing_epoch},{"joined_at_ms",x.joined_at_ms}};}
+json profile(const User& u){return {{"user_id",u.id},{"created_at_ms",u.created_at_ms},{"animal_icon",u.animal_icon}};}
+json device_status(const DeviceStatus& d){return {{"battery_percent",d.battery_percent},{"is_charging",d.is_charging},
+    {"updated_at_ms",d.updated_at_ms},{"sharing_epoch",d.sharing_epoch},
+    {"status",now_ms()-d.updated_at_ms>=kStaleAfterMs?"stale":"recent"}};}
+json map_mark(const MapMark& m){return {{"mark_id",m.id},{"room_id",m.room_id},{"creator_user_id",m.creator_id},
+    {"name",m.name},{"latitude",m.coordinate.latitude},{"longitude",m.coordinate.longitude},
+    {"created_at_ms",m.created_at_ms},{"updated_at_ms",m.updated_at_ms}};}
 json location(const Location& x){return {{"latitude",x.coordinate.latitude},{"longitude",x.coordinate.longitude},{"accuracy_m",x.accuracy_m},{"captured_at_ms",x.captured_at_ms},{"received_at_ms",x.received_at_ms},{"sharing_epoch",x.sharing_epoch},{"sequence",x.sequence}};}
 json note(const Note& x,const Id& room_id,const Id& member_id){json origin=nullptr;if(x.origin)origin={{"latitude",x.origin->latitude},{"longitude",x.origin->longitude},{"captured_at_ms",x.origin_captured_at_ms}};return {{"note_id",x.id},{"text",x.text},{"written_at_ms",x.written_at_ms},{"origin",origin},{"sharing_epoch",x.sharing_epoch},{"photo_available",x.photo.has_value()},{"photo_uploaded_at_ms",x.photo?json(x.photo->uploaded_at_ms):json(nullptr)},{"photo_path",x.photo && !member_id.empty()?json("/v1/rooms/"+room_id+"/members/"+member_id+"/photo"):json(nullptr)}};}
 std::string freshness(Freshness x){switch(x){case Freshness::off:return "off";case Freshness::no_data:return "no_data";case Freshness::fresh:return "fresh";case Freshness::delayed:return "delayed";default:return "stale";}}
 json visible(const MemberView& v){json j=member(v.member);j["location_status"]=freshness(v.location_status); // Defensive suppression; DB must also enforce visibility.
+j["animal_icon"]=v.member.animal_icon;
+j["device_status"]=v.member.is_sharing && v.device_status && v.device_status->sharing_epoch==v.member.sharing_epoch
+    ?json(device_status(*v.device_status)):json(nullptr);
 if(!v.member.is_sharing || v.location_status==Freshness::off){j["location"]=nullptr;j["note"]=nullptr;return j;}
 j["location"]=v.location_status!=Freshness::no_data && v.location && v.location->sharing_epoch==v.member.sharing_epoch?json(location(*v.location)):json(nullptr);
 j["note"]=v.note && v.note->sharing_epoch==v.member.sharing_epoch?json(note(*v.note,v.member.room_id,v.member.id)):json(nullptr);return j;}
@@ -95,8 +106,18 @@ std::string normalize_uuid(std::string value) {
   if (!std::regex_match(value, format)) throw std::invalid_argument("Invalid UUID");
   return value;
 }
+std::int64_t query_integer(const httplib::Request& req,const char* key,std::int64_t fallback) {
+    if(!req.has_param(key)) return fallback;
+    if(req.get_param_value_count(key)!=1) throw std::invalid_argument("Duplicate query parameter");
+    const auto text=req.get_param_value(key);
+    std::int64_t value{};
+    const auto parsed=std::from_chars(text.data(),text.data()+text.size(),value);
+    if(text.empty() || parsed.ec!=std::errc{} || parsed.ptr!=text.data()+text.size() || value<0)
+        throw std::invalid_argument("Invalid page parameter");
+    return value;
+}
 using Handler=std::function<void(const httplib::Request&,httplib::Response&,const Id&)>;
-void protect(httplib::Server& server,IRepository& repo,const std::string& method,const std::string& path,Handler handler){auto wrapped=[&repo,handler=std::move(handler)](const httplib::Request& req,httplib::Response& res){try{auto h=req.get_header_value("Authorization");if(h.rfind("Bearer ",0)!=0||h.size()!=71){fail(res,{ErrorCode::unauthenticated,"Missing or invalid bearer token"});return;}auto raw=h.substr(7);if(raw.find_first_not_of("0123456789abcdef")!=std::string::npos){fail(res,{ErrorCode::unauthenticated,"Invalid token"});return;}auto auth=repo.authenticate_guest(sha256(raw),now_ms());if(auto* e=std::get_if<Error>(&auth)){fail(res,*e);return;}handler(req,res,std::get<User>(auth).id);}catch(const std::exception& e){if(dynamic_cast<const std::invalid_argument*>(&e)||dynamic_cast<const json::exception*>(&e)||dynamic_cast<const std::out_of_range*>(&e))fail(res,{ErrorCode::invalid_argument,"Invalid request body or field"});else fail(res,{ErrorCode::internal,"Unexpected server failure"});}};
+void protect(httplib::Server& server,IRepository& repo,const std::string& method,const std::string& path,Handler handler){auto wrapped=[&repo,handler=std::move(handler)](const httplib::Request& req,httplib::Response& res){try{auto h=req.get_header_value("Authorization");if(h.rfind("Bearer ",0)!=0||h.size()!=71){fail(res,{ErrorCode::unauthenticated,"Missing or invalid bearer token"});return;}auto raw=h.substr(7);if(raw.find_first_not_of("0123456789abcdef")!=std::string::npos){fail(res,{ErrorCode::unauthenticated,"Invalid token"});return;}auto auth=repo.authenticate_guest(sha256(raw),now_ms());if(auto* e=std::get_if<Error>(&auth)){fail(res,*e);return;}const auto& user=std::get<User>(auth);if(user.expires_at_ms>0)res.set_header("X-Session-Expires-At-Ms",std::to_string(user.expires_at_ms));handler(req,res,user.id);}catch(const std::exception& e){if(dynamic_cast<const std::invalid_argument*>(&e)||dynamic_cast<const json::exception*>(&e)||dynamic_cast<const std::out_of_range*>(&e))fail(res,{ErrorCode::invalid_argument,"Invalid request body or field"});else fail(res,{ErrorCode::internal,"Unexpected server failure"});}};
 if(method=="GET")server.Get(path,wrapped);else if(method=="POST")server.Post(path,wrapped);else if(method=="PUT")server.Put(path,wrapped);else if(method=="DELETE")server.Delete(path,wrapped);}
 }
 int main(){try{
@@ -123,9 +144,9 @@ std::mutex cleanup_mutex;
 std::condition_variable_any cleanup_wakeup;
 std::atomic<bool> cleanup_requested{false};
 std::jthread cleanup_worker;
-if(photos) cleanup_worker=std::jthread([&](std::stop_token stop){
+cleanup_worker=std::jthread([&](std::stop_token stop){
   while(!stop.stop_requested()) {
-    try { photos->collect_garbage(now_ms()); }
+    try { if(std::holds_alternative<Error>(repo->collect_expired_data(now_ms()))) std::cerr<<"Retention cleanup will be retried.\n"; if(photos) photos->collect_garbage(now_ms()); }
     catch(const std::exception&) { std::cerr<<"Photo cleanup will be retried.\n"; }
     std::unique_lock lock(cleanup_mutex);
     cleanup_wakeup.wait_for(lock,stop,std::chrono::seconds(60),[&]{return cleanup_requested.exchange(false);});
@@ -137,17 +158,18 @@ server.set_payload_max_length(5 * 1024 * 1024 + 64 * 1024);
 server.set_read_timeout(15, 0);
 server.set_error_handler([](const auto&,auto& r){if(r.status==413)fail(r,{ErrorCode::photo_too_large,"request exceeds maximum size"});});
 server.set_post_routing_handler([&](const auto& req,auto& res){
-  if(photos && res.status>=200 && res.status<300 &&
+  if(res.status>=200 && res.status<300 &&
      ((req.method=="PUT" && (req.path.ends_with("/note") || req.path.ends_with("/note/photo"))) ||
-      (req.method=="DELETE" && req.path.ends_with("/note")) ||
+      (req.method=="DELETE") ||
       (req.method=="POST" && (req.path.ends_with("/leave") || req.path.ends_with("/end"))))) {
     cleanup_requested.store(true);
     cleanup_wakeup.notify_one();
   }
 });
 server.Get("/health",[](const auto&,auto& r){success(r,{{"status","ok"}});});
-server.Post("/v1/guests",[&](const auto& req,auto& r){try{if(!guest_requests.allow(req.remote_addr,30)){rate_limited(r);return;}body(req,{});auto t=token();auto now=now_ms();auto expires=now+kGuestSessionTtlMs;auto result=repo->create_guest(sha256(t),now,expires);output(r,std::move(result),[&](const User& u)->json{return {{"user_id",u.id},{"token",t},{"expires_at_ms",expires}};},201);}catch(const std::invalid_argument&){fail(r,{ErrorCode::invalid_argument,"Invalid guest request"});}catch(const json::exception&){fail(r,{ErrorCode::invalid_argument,"Invalid guest request"});}catch(const std::exception&){fail(r,{ErrorCode::internal,"Guest creation failed"});}});
+server.Post("/v1/guests",[&](const auto& req,auto& r){try{if(!guest_requests.allow(req.remote_addr,30)){rate_limited(r);return;}body(req,{});auto t=token();auto now=now_ms();auto expires=guest_session_expiry(now);auto result=repo->create_guest(sha256(t),now,expires);output(r,std::move(result),[&](const User& u)->json{return {{"user_id",u.id},{"token",t},{"expires_at_ms",expires}};},201);}catch(const std::invalid_argument&){fail(r,{ErrorCode::invalid_argument,"Invalid guest request"});}catch(const json::exception&){fail(r,{ErrorCode::invalid_argument,"Invalid guest request"});}catch(const std::exception&){fail(r,{ErrorCode::internal,"Guest creation failed"});}});
 const std::string base=R"(/v1/rooms/([0-9a-fA-F-]{36}))";
+#include "shared_data_routes.inc"
 protect(server,*repo,"POST","/v1/rooms",[&](auto& req,auto& r,const Id& actor){auto j=body(req,{"title","nickname"});auto result=rooms->create_room(actor,bounded(j,"title",60),bounded(j,"nickname",20),now_ms());output(r,std::move(result),[](const RoomMembership& m)->json{return {{"room",room(m.room)},{"member",member(m.member)}};},201);});
 protect(server,*repo,"POST","/v1/rooms/join",[&](auto& req,auto& r,const Id& actor){if(!join_requests.allow(req.remote_addr,30)){rate_limited(r);return;}auto j=body(req,{"invite_code","nickname"});auto result=rooms->join_room(actor,bounded(j,"invite_code",32),bounded(j,"nickname",20),now_ms());if(auto* e=std::get_if<Error>(&result)){fail(r,*e);return;}auto m=std::get<RoomMembership>(result);success(r,{{"room",room(m.room)},{"member",member(m.member)}});});
 protect(server,*repo,"GET",base,[&](auto& req,auto& r,const Id& actor){output(r,repo->get_room(actor,req.matches[1]),[](const Room& x)->json{return {{"room",room(x)}};});});

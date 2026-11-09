@@ -33,6 +33,7 @@ class MemoryStorage final : public PhotoStorage {
 public:
     std::map<std::string, SanitizedPhoto> objects;
     std::function<void()> after_upload;
+    bool fail_remove{};
     Result<Unit> upload(const std::string& key, const SanitizedPhoto& data) override {
         objects[key]=data; if(after_upload) after_upload(); return Unit{};
     }
@@ -40,7 +41,10 @@ public:
         if(!objects.contains(key)) return Error{ErrorCode::storage_unavailable,"missing"};
         return objects.at(key);
     }
-    Result<Unit> remove(const std::string& key) override { objects.erase(key); return Unit{}; }
+    Result<Unit> remove(const std::string& key) override {
+        if(fail_remove) return Error{ErrorCode::storage_unavailable,"simulated outage"};
+        objects.erase(key); return Unit{};
+    }
 };
 struct RoomCleanup {
     IRepository* repo{};
@@ -90,7 +94,35 @@ int main() {
         check(storage.objects.size()==1,"unattached object retained for cleanup");
         photos.collect_garbage(now+20+10LL*60*1000);
         check(storage.objects.empty(),"reserved object cleaned after grace period");
-        std::cout << "PASS: real DB photo attachment, visibility, trigger and cleanup; in-memory object storage\n";
+        storage.after_upload={};
+        value(db->set_sharing(host.id,room.room.id,true,now+30),"resume for retention");
+        note=value(db->save_note(host.id,room.room.id,{"retain photo",3},now+31),"retained note");
+        value(photos.upload(host.id,room.room.id,note.id,note.written_at_ms,3,png,now+32),"retained upload");
+        const auto ended=now+40;
+        value(db->end_room(host.id,room.room.id,ended),"end photo room");
+        value(db->collect_expired_data(ended+kRetentionMs-1),"before photo deadline");
+        photos.collect_garbage(ended+kRetentionMs-1);
+        check(storage.objects.size()==1,"end retains physical photo for 48 hours");
+        value(db->collect_expired_data(ended+kRetentionMs),"photo deadline");
+        photos.collect_garbage(ended+kRetentionMs);
+        check(storage.objects.empty(),"retention purges physical photo via queue");
+
+        auto next=value(rooms->create_room(host.id,"account erasure","host",now+50),"account room");
+        value(rooms->join_room(guest.id,next.room.invite_code,"guest",now+51),"account guest");
+        value(db->set_sharing(host.id,next.room.id,true,now+52),"account share");
+        note=value(db->save_note(host.id,next.room.id,{"erase photo",1},now+53),"account note");
+        value(photos.upload(host.id,next.room.id,note.id,note.written_at_ms,1,png,now+54),"account upload");
+        value(db->delete_user(host.id,now+55),"account deletion");
+        storage.fail_remove=true;
+        photos.collect_garbage(now_ms()+1000);
+        check(storage.objects.size()==1,"storage outage retains queued object for retry");
+        check(!value(db->due_photo_cleanup(now_ms()+1000),"retry queue").empty(),"cleanup survives storage failure");
+        storage.fail_remove=false;
+        photos.collect_garbage(now_ms()+1000);
+        check(storage.objects.empty(),"account deletion removes physical photo after retry");
+        check(value(db->get_room(guest.id,next.room.id),"other user room").host_id==guest.id,"other user preserved");
+        value(db->delete_user(guest.id,now+56),"cleanup account guest");
+        std::cout << "PASS: real DB photo attachment, 48h retention, account erasure and retryable object cleanup\n";
         return 0;
     } catch(const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << "\n";
