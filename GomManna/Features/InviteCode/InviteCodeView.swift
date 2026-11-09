@@ -7,7 +7,7 @@ struct InviteCodeView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 26) {
-                FormHeading(title: "같이 가요, 우리", subtitle: "QR을 보여주거나 초대 코드를 전달하세요.")
+                FormHeading(title: "초대 코드 확인", subtitle: "QR을 보여주거나 초대 코드를 전달하세요.")
                 if model.loading { ProgressView() }
                 if let error = model.error {
                     Text(error).foregroundStyle(.red)

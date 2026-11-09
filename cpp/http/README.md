@@ -19,6 +19,9 @@ cmake --build build/cpp --config Release
 
 ## 방과 사진
 
+2026-11-07 변경에는 스키마 버전 2가 필요하다. [DB 적용·배포 순서](../../docs/server/PRIVACY_MAP_DEPLOY.md)를
+먼저 확인한다. 사용자 삭제, 보존 기한, 지도 마킹·경로·배터리·프로필은 [API 6~10절](API.md)에 설명되어 있다.
+
 서영의 C 초대 코드·QR 모듈을 `gm_room` 서비스가 호출하고, 이 서비스가
 `IRepository`로 방을 생성·참가·탈퇴·종료한다. 새 초대 코드는 6자리다.
 이미 종료된 8자리 시험 방은 DB 기록으로만 보존된다.
@@ -95,3 +98,7 @@ cmake --build build/cpp --config Release
 종료된 방 기록이 남을 수 있다. 사진까지 시험하려면 비공개 Storage 설정과
 `GOMMANNA_RUN_PHOTO_INTEGRATION=1`을 추가한다. 이 옵션이 없으면 사진 경로는
 실제 Storage와 시험하지 않는다.
+
+경로/삭제의 실제 DB 경계 테스트는 `GOMMANNA_TEST_DATABASE_URL`과
+`GOMMANNA_RUN_SHARED_DB_TESTS=1`, 기존 저장소 회귀 테스트는 `GOMMANNA_RUN_DB_INTEGRATION=1`도
+필요하다. 48시간을 실제로 기다리지 않고 저장소에 시각을 주입해서 확인한다.

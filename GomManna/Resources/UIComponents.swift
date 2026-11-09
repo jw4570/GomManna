@@ -3,22 +3,11 @@ import SwiftUI
 struct BrandMark: View {
     var size: CGFloat = 64
     var body: some View {
-        ZStack {
-            HStack(spacing: size * 0.36) {
-                Circle().frame(width: size * 0.28, height: size * 0.28)
-                Circle().frame(width: size * 0.28, height: size * 0.28)
-            }.offset(y: -size * 0.30)
-            Ellipse().frame(width: size * 0.91, height: size * 0.82)
-            HStack(spacing: size * 0.28) {
-                Circle().frame(width: size * 0.065, height: size * 0.065)
-                Circle().frame(width: size * 0.065, height: size * 0.065)
-            }.foregroundStyle(AppStyle.background).offset(y: -size * 0.06)
-            Ellipse().fill(AppStyle.accentSoft).frame(width: size * 0.36, height: size * 0.25).offset(y: size * 0.15)
-            Ellipse().frame(width: size * 0.12, height: size * 0.08).offset(y: size * 0.12)
-        }
-        .foregroundStyle(AppStyle.accent)
-        .frame(width: size, height: size)
-        .accessibilityLabel("곰만나 로고")
+        Image("BrandMark")
+            .resizable()
+            .scaledToFit()
+            .frame(width: size, height: size)
+            .accessibilityLabel("곰만나 로고")
     }
 }
 

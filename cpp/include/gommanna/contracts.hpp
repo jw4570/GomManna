@@ -18,7 +18,12 @@ inline constexpr double kEarthRadiusM = 6371000.0;
 inline constexpr TimeMs kDelayedAfterMs = 30000;
 inline constexpr TimeMs kStaleAfterMs = 120000;
 inline constexpr TimeMs kFutureToleranceMs = 5000;
-inline constexpr TimeMs kGuestSessionTtlMs = 30LL * 24 * 60 * 60 * 1000;
+// Compatibility duration for fixtures. Production uses six calendar months (UTC).
+inline constexpr TimeMs kGuestSessionTtlMs = 180LL * 24 * 60 * 60 * 1000;
+inline constexpr TimeMs kRetentionMs = 48LL * 60 * 60 * 1000;
+inline constexpr TimeMs kRoomInactivityMs = 10LL * 60 * 1000;
+inline constexpr TimeMs kRouteHeartbeatMs = 60LL * 1000;
+inline constexpr double kRouteMinimumDistanceM = 20.0;
 inline constexpr int kMaxRoomMembers = 8;
 
 enum class ErrorCode {
@@ -33,7 +38,11 @@ template<class T> using Result = std::variant<T, Error>;
 enum class Freshness { off, no_data, fresh, delayed, stale };
 
 struct Coordinate { double latitude{}; double longitude{}; };
-struct User { Id id; TimeMs created_at_ms{}; };
+struct User {
+    Id id; TimeMs created_at_ms{};
+    std::string animal_icon{"bear"};
+    TimeMs expires_at_ms{};
+};
 struct Room {
     Id id; std::string title; Id host_id; std::string invite_code;
     bool active{true}; TimeMs created_at_ms{};
@@ -42,6 +51,19 @@ struct Room {
 struct Member {
     Id id; Id room_id; Id user_id; std::string nickname;
     bool is_sharing{false}; Epoch sharing_epoch{}; TimeMs joined_at_ms{};
+    std::optional<TimeMs> left_at_ms;
+    std::string animal_icon{"bear"};
+};
+struct DeviceStatus {
+    std::optional<int> battery_percent;
+    std::optional<bool> is_charging;
+    TimeMs updated_at_ms{};
+    Epoch sharing_epoch{};
+};
+struct DeviceStatusDraft {
+    std::optional<int> battery_percent;
+    std::optional<bool> is_charging;
+    Epoch sharing_epoch{};
 };
 struct Location {
     Coordinate coordinate;
@@ -68,6 +90,21 @@ struct MemberView {
     Freshness location_status{Freshness::no_data};
     std::optional<Location> location;
     std::optional<Note> note;
+    std::optional<DeviceStatus> device_status;
+};
+struct MapMark {
+    Id id; Id room_id; Id creator_id; std::string name;
+    Coordinate coordinate;
+    TimeMs created_at_ms{}; TimeMs updated_at_ms{};
+};
+struct MapMarkDraft { std::string name; Coordinate coordinate; };
+struct RoutePoint {
+    std::int64_t id{}; Id member_id;
+    Location location;
+};
+struct RoutePage {
+    std::vector<RoutePoint> points;
+    std::optional<std::int64_t> next_after_id;
 };
 struct RoomMembership { Room room; Member member; };
 struct Invite { std::string invite_code; std::string qr_payload; std::string qr_svg; };
@@ -116,6 +153,18 @@ public:
         TimeMs not_before_ms) = 0;
     virtual Result<std::vector<std::string>> due_photo_cleanup(TimeMs now_ms) = 0;
     virtual Result<Unit> finish_photo_cleanup(const std::string& key) = 0;
+    // Optional defaults keep third-party test adapters source-compatible.
+    virtual Result<User> get_profile(const Id&) { return Error{ErrorCode::not_implemented,"profile unavailable"}; }
+    virtual Result<User> update_profile(const Id&, const std::string&) { return Error{ErrorCode::not_implemented,"profile unavailable"}; }
+    virtual Result<Unit> delete_user(const Id&, TimeMs) { return Error{ErrorCode::not_implemented,"deletion unavailable"}; }
+    virtual Result<Unit> delete_member_data(const Id&, const Id&, bool, TimeMs) { return Error{ErrorCode::not_implemented,"deletion unavailable"}; }
+    virtual Result<DeviceStatus> update_device_status(const Id&, const Id&, const DeviceStatusDraft&, TimeMs) { return Error{ErrorCode::not_implemented,"device status unavailable"}; }
+    virtual Result<std::vector<MapMark>> list_marks(const Id&, const Id&) { return Error{ErrorCode::not_implemented,"marks unavailable"}; }
+    virtual Result<MapMark> create_mark(const Id&, const Id&, const MapMarkDraft&, TimeMs) { return Error{ErrorCode::not_implemented,"marks unavailable"}; }
+    virtual Result<MapMark> rename_mark(const Id&, const Id&, const Id&, const std::string&, TimeMs) { return Error{ErrorCode::not_implemented,"marks unavailable"}; }
+    virtual Result<Unit> delete_mark(const Id&, const Id&, const Id&) { return Error{ErrorCode::not_implemented,"marks unavailable"}; }
+    virtual Result<RoutePage> get_route(const Id&, const Id&, const Id&, std::int64_t, int, TimeMs) { return Error{ErrorCode::not_implemented,"route unavailable"}; }
+    virtual Result<Unit> collect_expired_data(TimeMs) { return Unit{}; }
 };
 
 // Seoyeong: room rules + invite/QR; uses IRepository, never writes SQL here.

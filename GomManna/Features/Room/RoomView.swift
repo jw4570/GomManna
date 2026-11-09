@@ -8,6 +8,8 @@ struct RoomView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var model: RoomViewModel
     @State private var profile = ProfileViewModel.shared
+    @State private var placeSearch = PlaceSearchViewModel()
+    @State private var placeDetails: PlaceDetailsViewModel?
     init(room: Room, session: AppSession? = nil, model: RoomViewModel? = nil, onRemove: @escaping () -> Void) {
         self.room = room
         self.session = session ?? .shared
@@ -32,6 +34,19 @@ struct RoomView: View {
             .frame(width: geometry.size.width, height: fullHeight)
             .overlay(alignment: .topTrailing) {
                 HStack(spacing: 10) {
+                    Button {
+                        model.isMarking = false
+                        model.showingMeetingPoint = true
+                    } label: {
+                        Image(systemName: "point.3.connected.trianglepath.dotted")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(model.meetingPoint.isEnabled ? AppStyle.onAccent : AppStyle.accent)
+                            .frame(width: 48, height: 48)
+                            .background(model.meetingPoint.isEnabled ? AppStyle.accent : AppStyle.background, in: Circle())
+                            .shadow(color: .black.opacity(0.10), radius: 8, y: 3)
+                    }
+                    .accessibilityLabel("중간 지점 계산 설정")
+                    .accessibilityAddTraits(model.meetingPoint.isEnabled ? .isSelected : [])
                     Button { model.toggleMarking() } label: {
                         Image(systemName: model.isMarking ? "mappin.circle.fill" : "mappin.and.ellipse")
                             .font(.system(size: 20, weight: .semibold))
@@ -54,9 +69,29 @@ struct RoomView: View {
                 }
                 .buttonStyle(.plain)
                 .padding(16)
+                .opacity(placeSearch.isOpen ? 0 : 1)
+                .scaleEffect(placeSearch.isOpen ? 0.9 : 1, anchor: .trailing)
+                .allowsHitTesting(!placeSearch.isOpen)
+                .accessibilityHidden(placeSearch.isOpen)
+                .animation(.easeOut(duration: 0.2), value: placeSearch.isOpen)
+            }
+            .overlay(alignment: .topLeading) {
+                PlaceSearchView(model: placeSearch, width: max(48, geometry.size.width - 32)) {
+                    model.clearMapSelection()
+                } onSelect: { place in
+                    model.searchedPlace = place
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        model.camera = .region(MKCoordinateRegion(
+                            center: place.placemark.coordinate,
+                            span: MKCoordinateSpan(latitudeDelta: 0.005, longitudeDelta: 0.005)))
+                    }
+                } onMapResults: { places in
+                    model.searchedPlaces = places
+                }
+                .padding(16)
             }
             .overlay(alignment: .top) {
-                if let error = model.errorMessage {
+                if !placeSearch.isOpen, let error = model.errorMessage ?? (model.meetingPoint.isEnabled ? model.meetingPoint.error : nil) {
                     Text(error).font(.caption).foregroundStyle(.red)
                         .padding(12).frame(maxWidth: .infinity)
                         .background(AppStyle.background, in: RoundedRectangle(cornerRadius: 16))
@@ -65,6 +100,11 @@ struct RoomView: View {
             }
             .coordinateSpace(name: "roomPanelContainer")
             .clipped()
+        }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
+        .onAppear {
+            model.updateMembers(currentRoom.members)
+            model.resetEntryCamera()
         }
         .task(id: scenePhase) {
             if scenePhase == .active { await model.run(room: room) }
@@ -82,16 +122,49 @@ struct RoomView: View {
             TextField("예: 여기서 만나요", text: $model.markName)
             Button("취소", role: .cancel) { model.cancelMark() }
             Button("저장") { model.saveMark() }.disabled(!model.canSaveMark)
+            if model.canDeleteMark {
+                Button("마킹 삭제", role: .destructive) { model.deletePendingMark() }
+            }
         } message: {
             Text("선택한 장소의 이름을 정해주세요.")
+        }
+        .sheet(isPresented: $model.showingMeetingPoint) {
+            MeetingPointView(roomModel: model)
         }
         .sheet(isPresented: $model.showingNotes) { MemberNotesView(room: currentRoom, session: session) }
         .sheet(isPresented: $model.showingProfile) { ProfileView() }
         .sheet(isPresented: $model.showingSettings) { RoomSettingsView(room: currentRoom, onRemove: onRemove, session: session) }
+        .sheet(item: $placeDetails) { PlaceDetailsView(model: $0) }
     }
     private var roomMap: some View {
         MapReader { proxy in
             Map(position: $model.camera) {
+                ForEach(Array(model.searchedPlaces.enumerated()), id: \.offset) { _, place in
+                    Annotation(place.name ?? "검색한 장소", coordinate: place.placemark.coordinate, anchor: .center) {
+                        Button {
+                            if model.isMarking { model.pinSearchedPlace(place) }
+                            else {
+                                placeSearch.close()
+                                placeDetails = PlaceDetailsViewModel(place: place)
+                            }
+                        } label: {
+                            Image(systemName: "mappin.circle.fill")
+                                .font(.system(size: 36))
+                                .foregroundStyle(AppStyle.accent.opacity(0.7), AppStyle.background)
+                                .frame(width: 44, height: 44)
+                        }
+                        .buttonStyle(.plain)
+                        .overlay(alignment: .top) {
+                            Text(place.name ?? "검색한 장소")
+                                .font(.caption2.weight(.semibold))
+                                .padding(.horizontal, 8).padding(.vertical, 4)
+                                .background(AppStyle.background, in: RoundedRectangle(cornerRadius: 10))
+                                .fixedSize().offset(y: 46).allowsHitTesting(false)
+                        }
+                        .accessibilityLabel(place.name ?? "검색한 장소")
+                        .accessibilityHint(model.isMarking ? "고정 마커 만들기" : "장소 상세 정보 보기")
+                    }.annotationTitles(.hidden)
+                }
                 ForEach(currentRoom.members) { member in
                     if let coordinate = model.coordinate(for: member) {
                         Annotation(member.name, coordinate: coordinate, anchor: .center) {
@@ -103,16 +176,21 @@ struct RoomView: View {
                         }.annotationTitles(.hidden)
                     }
                 }
-                ForEach(model.marks) { mark in
-                    Marker(mark.name, coordinate: mark.coordinate).tint(AppStyle.accent)
+                if let coordinate = model.meetingPoint.coordinate {
+                    Annotation("실시간 중간 지점", coordinate: coordinate, anchor: .center) {
+                        MeetingPointAnnotationView(model: model)
+                    }.annotationTitles(.hidden)
                 }
-                if let pending = model.pendingMark {
-                    Marker(pending.name, coordinate: pending.coordinate).tint(AppStyle.accent)
+                ForEach(model.displayedMarks) { mark in
+                    Annotation(mark.name, coordinate: mark.coordinate, anchor: .center) {
+                        MapMarkAnnotationView(markID: mark.id, model: model)
+                    }.annotationTitles(.hidden)
                 }
             }
             .mapStyle(.standard(elevation: .flat, pointsOfInterest: .excludingAll))
             .onMapCameraChange(frequency: .continuous) { context in
                 model.updateMapZoom(distance: context.camera.distance)
+                placeSearch.region = context.region
             }
             .background {
                 MapBackgroundTapObserver(isMarking: model.isMarking) { coordinate in
@@ -189,8 +267,6 @@ struct RoomView: View {
             // 패널과 목록 크기를 고정하고 전체 위치만 이동해 레이아웃 피드백을 막습니다.
             ScrollView {
                 VStack(spacing: 6) {
-                    Text("공유를 켜면 화면을 잠그거나 홈으로 돌아가도 위치를 공유해요.")
-                        .font(.caption).foregroundStyle(.secondary)
                     Toggle("내 위치 공유", isOn: Binding(get: { model.isSharing }, set: { value in
                         Task { await model.setSharing(value, room: room) }
                     })).tint(AppStyle.accent).disabled(model.changingSharing)
@@ -224,8 +300,7 @@ struct RoomView: View {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(member.name).font(.body.weight(.medium))
-                                        if let distance = model.distanceText(to: member) { Text(distance).font(.caption).foregroundStyle(.secondary) }
-                                        if member.locationStatus == .stale || member.locationStatus == .delayed { Text("이전 위치").font(.caption).foregroundStyle(.secondary) }
+                                        Text(model.distanceLabel(to: member)).font(.caption).foregroundStyle(.secondary)
                                     }
                                     if member.id == room.myMemberID {
                                         Text("나").font(.caption).foregroundStyle(.secondary)
