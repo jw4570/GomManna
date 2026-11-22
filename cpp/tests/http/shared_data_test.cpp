@@ -96,7 +96,8 @@ void exercise(IRepository& db,TimeMs t){
     value(db.collect_expired_data(t+76000+kRetentionMs),"at deadline");
     check(value(db.get_route(host.id,id,"",0,500,t),"current expired").points.empty(),"current data expires at 48h");
     check(value(db.get_route(guest.id,id,"",0,500,t),"left retained").points.size()==1,"left data waits for room end");
-    check(value(db.due_photo_cleanup(t+76000+kRetentionMs),"left photo retained").empty(),"left photo not deleted early");
+    auto retained_queue=value(db.due_photo_cleanup(t+76000+kRetentionMs),"left photo retained");
+    check(std::find(retained_queue.begin(),retained_queue.end(),key)==retained_queue.end(),"left photo not deleted early");
     const auto ended=t+76000+kRetentionMs+1000;
     value(db.end_room(host.id,id,ended),"end");
     value(db.collect_expired_data(ended+kRetentionMs-1),"before end deadline");

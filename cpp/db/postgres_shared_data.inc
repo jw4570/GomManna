@@ -75,6 +75,8 @@ Result<Unit> PostgresRepository::delete_member_data(const Id& actor,const Id& ro
         auto member=locked_member(actor,room_id,true);
         exec(conn_.get(),"delete from gommanna.route_points where member_id=$1::uuid",{member.id});
         if(!route_only) {
+            exec(conn_.get(),"delete from gommanna.trip_notes where member_id=$1::uuid",{member.id});
+            exec(conn_.get(),"update gommanna.room_members set trip_history_shared=false where id=$1::uuid",{member.id});
             exec(conn_.get(),"delete from gommanna.member_locations where member_id=$1::uuid",{member.id});
             exec(conn_.get(),"delete from gommanna.member_notes where member_id=$1::uuid",{member.id});
             exec(conn_.get(),"delete from gommanna.map_marks where room_id=$1::uuid and creator_id=$2::uuid",{room_id,actor});
@@ -203,7 +205,7 @@ Result<Unit> PostgresRepository::collect_expired_data(TimeMs now) {
             }
             // A departed member's content has the explicit room-ended deadline,
             // not another participant's sharing-OFF/inactivity deadline.
-            for(const auto* table:{"member_locations","member_notes","route_points"})
+            for(const auto* table:{"member_locations","member_notes","route_points","trip_notes"})
                 exec(conn_.get(),std::string("delete from gommanna.")+table+
                     " x using gommanna.room_members m where x.member_id=m.id and m.room_id=$1::uuid and m.left_at is null",{room.id});
             exec(conn_.get(),"delete from gommanna.map_marks k using gommanna.room_members m "

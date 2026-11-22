@@ -20,6 +20,8 @@ public:
         TimeMs expected_written_at_ms, Epoch epoch, std::string_view data, TimeMs now);
     Result<SanitizedPhoto> download(const Id& actor, const Id& room,
         const Id& member_id, TimeMs now);
+    Result<SanitizedPhoto> download_trip(const Id& actor, const Id& room,
+        std::int64_t record_id, TimeMs now);
     void collect_garbage(TimeMs now);
 
 private:

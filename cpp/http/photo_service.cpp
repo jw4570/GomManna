@@ -3,6 +3,7 @@
 #include <openssl/rand.h>
 
 #include <algorithm>
+#include <chrono>
 #include <string>
 #include <utility>
 
@@ -93,6 +94,22 @@ Result<SanitizedPhoto> PhotoService::download(const Id& actor, const Id& room,
         after.note->photo->key != key ||
         after.member.sharing_epoch != before.member.sharing_epoch)
         return Error{ErrorCode::not_found, "photo not found"};
+    return std::get<SanitizedPhoto>(std::move(image));
+}
+
+Result<SanitizedPhoto> PhotoService::download_trip(const Id& actor,const Id& room,
+    std::int64_t record_id,TimeMs now) {
+    auto first=repository_.get_trip_photo(actor,room,record_id,now);
+    if(const auto* e=std::get_if<Error>(&first))return *e;
+    const auto key=std::get<PhotoRef>(first).key;
+    auto image=storage_.download(key);
+    if(const auto* e=std::get_if<Error>(&image))return *e;
+    // Re-check revocation, deletion and expiry after storage I/O.
+    const auto clock=std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    auto again=repository_.get_trip_photo(actor,room,record_id,std::max(now,clock));
+    if(const auto* e=std::get_if<Error>(&again))return *e;
+    if(std::get<PhotoRef>(again).key!=key)return Error{ErrorCode::not_found,"photo changed"};
     return std::get<SanitizedPhoto>(std::move(image));
 }
 

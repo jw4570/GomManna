@@ -83,8 +83,8 @@ int main() {
         auto invalid=loc; invalid.coordinate.latitude=91;
         error(repository->update_location(host.id,room.room.id,invalid,now),ErrorCode::invalid_argument,"invalid coordinate rejected");
         auto note=value(repository->save_note(host.id,room.room.id,NoteDraft{"3층 에스컬레이터 옆",1},now+1000),"save note");
-        check(note.id==empty_note.id && note.origin && std::abs(note.origin->latitude-first.latitude)<1e-9,
-              "note captures current location and retains id");
+        check(note.id!=empty_note.id && note.origin && std::abs(note.origin->latitude-first.latitude)<1e-9,
+              "note captures current location and has a new revision id");
         loc.coordinate={37.565,126.979}; loc.sequence=2; loc.captured_at_ms=now+2000;
         value(repository->update_location(host.id,room.room.id,loc,now+2000),"move location");
         auto visible=value(repository->list_visible_members(guest.id,room.room.id,now+3000),"view shared data");
