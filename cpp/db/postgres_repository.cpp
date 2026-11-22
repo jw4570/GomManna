@@ -196,6 +196,14 @@ public:
     Result<MapMark> rename_mark(const Id&,const Id&,const Id&,const std::string&,TimeMs) override;
     Result<Unit> delete_mark(const Id&,const Id&,const Id&) override;
     Result<RoutePage> get_route(const Id&,const Id&,const Id&,std::int64_t,int,TimeMs) override;
+    Result<std::vector<TripSummary>> list_trips(const Id&,int,int,TimeMs) override;
+    Result<TripDetail> get_trip(const Id&,const Id&,TimeMs) override;
+    Result<bool> get_trip_sharing(const Id&,const Id&,TimeMs) override;
+    Result<Unit> set_trip_sharing(const Id&,const Id&,bool,TimeMs) override;
+    Result<RoutePage> get_trip_route(const Id&,const Id&,const Id&,std::int64_t,int,TimeMs) override;
+    Result<TripNotePage> get_trip_notes(const Id&,const Id&,std::int64_t,int,TimeMs) override;
+    Result<PhotoRef> get_trip_photo(const Id&,const Id&,std::int64_t,TimeMs) override;
+    Result<Unit> delete_trip_note(const Id&,const Id&,std::int64_t,TimeMs) override;
     Result<Unit> collect_expired_data(TimeMs) override;
 private:
     template<class T, class F> Result<T> guarded(F&& function) {
@@ -238,6 +246,8 @@ private:
         if (PQntuples(r.get())==0) reject(ErrorCode::forbidden,"not a room member");
         return member_at(r.get(),0);
     }
+    TripSummary locked_trip(const Id&,const Id&,TimeMs);
+    Member trip_target(const Id&,const Id&,const Id&);
     void require_user(const Id& user) {
         require_text(user);
         auto r=exec(conn_.get(),"select 1 from gommanna.users where id=$1::uuid",{user});
@@ -373,7 +383,7 @@ Result<Unit> PostgresRepository::leave_room(const Id& actor, const Id& room_id, 
         Member member=locked_member(actor,room_id);
         if(room.host_id==actor) reject(ErrorCode::forbidden,"host must end the room");
         exec(conn_.get(),"update gommanna.room_members set left_at=to_timestamp($2::double precision/1000),"
-            "is_sharing=false,sharing_epoch=sharing_epoch+1 where id=$1::uuid",{member.id,std::to_string(now)});
+            "is_sharing=false,sharing_epoch=sharing_epoch+1,trip_history_shared=false where id=$1::uuid",{member.id,std::to_string(now)});
         refresh_retention(room_id,now);
         tx.commit();
         return Unit{};
@@ -529,7 +539,7 @@ Result<Note> PostgresRepository::save_note(const Id& actor, const Id& room_id, c
             "(member_id,room_id,text,written_at,origin_latitude,origin_longitude,origin_captured_at,sharing_epoch) "
             "values($1::uuid,$2::uuid,btrim($3),to_timestamp($4::double precision/1000),$5::float8,$6::float8,"
               "to_timestamp($7::double precision/1000),$8::bigint) "
-            "on conflict(member_id) do update set text=excluded.text,written_at=excluded.written_at,"
+            "on conflict(member_id) do update set id=gen_random_uuid(),text=excluded.text,written_at=excluded.written_at,"
               "origin_latitude=excluded.origin_latitude,origin_longitude=excluded.origin_longitude,"
               "origin_captured_at=excluded.origin_captured_at,sharing_epoch=excluded.sharing_epoch,"
               "photo_key=null,photo_uploaded_at=null returning *) select "+kNoteColumns+"from stored n",
@@ -548,6 +558,7 @@ Result<Unit> PostgresRepository::delete_note(const Id& actor, const Id& room_id,
         locked_room(room_id);
         Member member=locked_member(actor,room_id);
         if(!member.is_sharing) reject(ErrorCode::sharing_off,"sharing is off");
+        exec(conn_.get(),"delete from gommanna.trip_notes where member_id=$1::uuid",{member.id});
         exec(conn_.get(),"delete from gommanna.member_notes where member_id=$1::uuid",{member.id});
         tx.commit();
         return Unit{};
@@ -599,6 +610,7 @@ Result<std::vector<std::string>> PostgresRepository::due_photo_cleanup(TimeMs no
         auto rows=exec(conn_.get(),"select q.storage_key from gommanna.photo_cleanup q "
             "where q.not_before<=to_timestamp($1::double precision/1000) "
             "and not exists(select 1 from gommanna.member_notes n where n.photo_key=q.storage_key) "
+            "and not exists(select 1 from gommanna.trip_notes n where n.photo_key=q.storage_key) "
             "order by q.created_at limit 20",{std::to_string(now)});
         std::vector<std::string> result;
         for(int i=0;i<PQntuples(rows.get());++i) result.push_back(string_at(rows.get(),i,"storage_key"));
@@ -610,12 +622,14 @@ Result<Unit> PostgresRepository::finish_photo_cleanup(const std::string& key) {
     return guarded<Unit>([&] {
         require_text(key);
         exec(conn_.get(),"delete from gommanna.photo_cleanup q where q.storage_key=$1 "
-            "and not exists(select 1 from gommanna.member_notes n where n.photo_key=q.storage_key)",{key});
+            "and not exists(select 1 from gommanna.member_notes n where n.photo_key=q.storage_key) "
+            "and not exists(select 1 from gommanna.trip_notes n where n.photo_key=q.storage_key)",{key});
         return Unit{};
     });
 }
 
 #include "postgres_shared_data.inc"
+#include "postgres_trip_history.inc"
 
 } // namespace
 
@@ -640,7 +654,7 @@ Result<std::unique_ptr<IRepository>> make_postgres_repository(const RepositoryCo
         return Error{ErrorCode::db_unavailable,"database TLS is required"};
     try {
         exec(connection.get(),"set role gommanna_server");
-        auto schema=exec(connection.get(),"select 1 from gommanna.schema_versions where version=2");
+        auto schema=exec(connection.get(),"select 1 from gommanna.schema_versions where version=3");
         if(!PQntuples(schema.get())) return Error{ErrorCode::db_unavailable,"database migration required"};
         exec(connection.get(),"set client_encoding to 'UTF8'");
         exec(connection.get(),"set time zone 'UTC'");
