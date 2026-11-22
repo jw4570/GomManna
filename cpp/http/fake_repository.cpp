@@ -142,7 +142,7 @@ class Fake final:public IRepository {
  });}
  Result<Note> save_note(const Id& actor,const Id& room,const NoteDraft& draft,TimeMs now) override{return run<Note>([&]{
    room_check(room);auto& m=own(actor,room);check_sharing(m,draft.sharing_epoch);
-   Note n;n.id=notes.contains(m.id)?notes.at(m.id).id:uid();erase_note(m.id,now);
+   Note n;n.id=uid();erase_note(m.id,now);
    n.text=draft.text;n.written_at_ms=now;n.sharing_epoch=draft.sharing_epoch;
    if(locations.contains(m.id)){auto& p=locations.at(m.id);if(classify_location(p,true,m.sharing_epoch,now)==Freshness::fresh){n.origin=p.coordinate;n.origin_captured_at_ms=p.captured_at_ms;}}
    notes[m.id]=n;refresh(room,now);return n;

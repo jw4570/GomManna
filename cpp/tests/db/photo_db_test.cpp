@@ -33,13 +33,16 @@ class MemoryStorage final : public PhotoStorage {
 public:
     std::map<std::string, SanitizedPhoto> objects;
     std::function<void()> after_upload;
+    std::function<void()> after_download;
     bool fail_remove{};
     Result<Unit> upload(const std::string& key, const SanitizedPhoto& data) override {
         objects[key]=data; if(after_upload) after_upload(); return Unit{};
     }
     Result<SanitizedPhoto> download(const std::string& key) override {
         if(!objects.contains(key)) return Error{ErrorCode::storage_unavailable,"missing"};
-        return objects.at(key);
+        auto result=objects.at(key);
+        if(after_download) after_download();
+        return result;
     }
     Result<Unit> remove(const std::string& key) override {
         if(fail_remove) return Error{ErrorCode::storage_unavailable,"simulated outage"};
@@ -86,23 +89,32 @@ int main() {
         check(std::holds_alternative<Error>(photos.download(guest.id,room.room.id,room.member.id,now)),"old epoch hidden");
         note=value(db->save_note(host.id,room.room.id,{"new",2},now+10),"replace note");
         photos.collect_garbage(now_ms()+1000);
-        check(storage.objects.empty(),"database trigger queued old photo");
+        check(storage.objects.size()==1,"historical note keeps old photo alive");
         storage.after_upload=[&]{ (void)db->set_sharing(host.id,room.room.id,false,now+20); };
         auto raced=photos.upload(host.id,room.room.id,note.id,note.written_at_ms,2,png,now+20);
         check(std::holds_alternative<Error>(raced) && std::get<Error>(raced).code==ErrorCode::sharing_off,
               "OFF during upload must reject attachment");
-        check(storage.objects.size()==1,"unattached object retained for cleanup");
+        check(storage.objects.size()==2,"unattached object plus historical photo retained");
         photos.collect_garbage(now+20+10LL*60*1000);
-        check(storage.objects.empty(),"reserved object cleaned after grace period");
+        check(storage.objects.size()==1,"only unreferenced reserved object cleaned after grace period");
         storage.after_upload={};
         value(db->set_sharing(host.id,room.room.id,true,now+30),"resume for retention");
         note=value(db->save_note(host.id,room.room.id,{"retain photo",3},now+31),"retained note");
         value(photos.upload(host.id,room.room.id,note.id,note.written_at_ms,3,png,now+32),"retained upload");
         const auto ended=now+40;
         value(db->end_room(host.id,room.room.id,ended),"end photo room");
+        auto history=value(db->get_trip_notes(host.id,room.room.id,0,200,ended),"own trip notes");
+        auto record=history.notes.back().record_id;
+        check(std::holds_alternative<Error>(photos.download_trip(guest.id,room.room.id,record,ended)),"default OFF hides trip photo");
+        value(db->set_trip_sharing(host.id,room.room.id,true,ended),"share trip photo");
+        value(photos.download_trip(guest.id,room.room.id,record,ended),"authorized trip photo");
+        storage.after_download=[&]{ value(db->set_trip_sharing(host.id,room.room.id,false,ended),"revoke during download"); };
+        check(std::holds_alternative<Error>(photos.download_trip(guest.id,room.room.id,record,ended)),"revoked during storage I/O must not return image");
+        storage.after_download={};
+
         value(db->collect_expired_data(ended+kRetentionMs-1),"before photo deadline");
         photos.collect_garbage(ended+kRetentionMs-1);
-        check(storage.objects.size()==1,"end retains physical photo for 48 hours");
+        check(storage.objects.size()==2,"end retains current and historical photos for 48 hours");
         value(db->collect_expired_data(ended+kRetentionMs),"photo deadline");
         photos.collect_garbage(ended+kRetentionMs);
         check(storage.objects.empty(),"retention purges physical photo via queue");

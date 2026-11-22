@@ -106,6 +106,12 @@ struct RoutePage {
     std::vector<RoutePoint> points;
     std::optional<std::int64_t> next_after_id;
 };
+// Completed-trip APIs never expose raw Storage keys in JSON.
+struct TripSummary { Room room; TimeMs expires_at_ms{}; };
+struct TripMember { Member member; bool history_shared{}; };
+struct TripDetail { TripSummary trip; std::vector<TripMember> members; std::vector<MapMark> marks; };
+struct TripNote { std::int64_t record_id{}; Id member_id; Note note; };
+struct TripNotePage { std::vector<TripNote> notes; std::optional<std::int64_t> next_after_id; };
 struct RoomMembership { Room room; Member member; };
 struct Invite { std::string invite_code; std::string qr_payload; std::string qr_svg; };
 struct TravelEstimate {
@@ -164,6 +170,14 @@ public:
     virtual Result<MapMark> rename_mark(const Id&, const Id&, const Id&, const std::string&, TimeMs) { return Error{ErrorCode::not_implemented,"marks unavailable"}; }
     virtual Result<Unit> delete_mark(const Id&, const Id&, const Id&) { return Error{ErrorCode::not_implemented,"marks unavailable"}; }
     virtual Result<RoutePage> get_route(const Id&, const Id&, const Id&, std::int64_t, int, TimeMs) { return Error{ErrorCode::not_implemented,"route unavailable"}; }
+    virtual Result<std::vector<TripSummary>> list_trips(const Id&, int, int, TimeMs) { return Error{ErrorCode::not_implemented,"trips unavailable"}; }
+    virtual Result<TripDetail> get_trip(const Id&, const Id&, TimeMs) { return Error{ErrorCode::not_implemented,"trips unavailable"}; }
+    virtual Result<bool> get_trip_sharing(const Id&, const Id&, TimeMs) { return Error{ErrorCode::not_implemented,"trips unavailable"}; }
+    virtual Result<Unit> set_trip_sharing(const Id&, const Id&, bool, TimeMs) { return Error{ErrorCode::not_implemented,"trips unavailable"}; }
+    virtual Result<RoutePage> get_trip_route(const Id&, const Id&, const Id&, std::int64_t, int, TimeMs) { return Error{ErrorCode::not_implemented,"trips unavailable"}; }
+    virtual Result<TripNotePage> get_trip_notes(const Id&, const Id&, std::int64_t, int, TimeMs) { return Error{ErrorCode::not_implemented,"trips unavailable"}; }
+    virtual Result<PhotoRef> get_trip_photo(const Id&, const Id&, std::int64_t, TimeMs) { return Error{ErrorCode::not_implemented,"trips unavailable"}; }
+    virtual Result<Unit> delete_trip_note(const Id&, const Id&, std::int64_t, TimeMs) { return Error{ErrorCode::not_implemented,"trips unavailable"}; }
     virtual Result<Unit> collect_expired_data(TimeMs) { return Unit{}; }
 };
 

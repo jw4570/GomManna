@@ -104,4 +104,12 @@ if(BUILD_TESTING AND GOMMANNA_BUILD_HTTP_DB_TESTS AND NOT GOMMANNA_USE_FAKE_REPO
   target_link_libraries(gm_photo_db_test PRIVATE gm_contract gm_db gm_room gm_photo_image OpenSSL::Crypto)
   add_test(NAME photo_real_db_integration COMMAND gm_photo_db_test)
   set_tests_properties(photo_real_db_integration PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 90)
+  add_executable(gm_trip_history_test tests/db/trip_history_test.cpp)
+  target_link_libraries(gm_trip_history_test PRIVATE gm_contract gm_db)
+  add_test(NAME trip_history_real_db COMMAND gm_trip_history_test)
+  set_tests_properties(trip_history_real_db PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120)
+  add_test(NAME trip_http_real_db
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/http/trip_api_test.py
+      --server $<TARGET_FILE:gommanna_server>)
+  set_tests_properties(trip_http_real_db PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120)
 endif()
